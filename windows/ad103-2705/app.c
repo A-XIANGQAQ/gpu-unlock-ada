@@ -67,20 +67,18 @@ EFI_STATUS EFIAPI UefiMain(EFI_HANDLE image,EFI_SYSTEM_TABLE *t) {
   GuLog("Transaction result=%d safe=%u retained=%u started=%u quiesced=%u flrs=%u DMA_live=%u\n",
     result,GuSafeToReturn(),Gu.retained,Gu.started,Gu.quiesced,Gu.flrs,Gu.dma_count);
   if(result||Gu.fault){
-    GuLog("transaction incomplete result=%d fault=%u; continuing if hardware is safe\n",result,Gu.fault);
-    if(!GuSafeToReturn()){s=EFI_DEVICE_ERROR;goto failed;}
+    GuLog("transaction incomplete result=%d fault=%u; refusing to continue\n",result,Gu.fault);
+    s=EFI_DEVICE_ERROR;goto failed;
   }
   stage="release-exclusive-claim";s=GuMsiFinish();
   if(s!=EFI_SUCCESS||Gu.fault){
-    GuLog("finish incomplete status=%#llx; continuing if hardware is safe\n",(unsigned long long)s);
-    if(!GuSafeToReturn())goto failed;
+    GuLog("finish incomplete status=%#llx\n",(unsigned long long)s);
+    goto failed;
   }
   /* The final pre-Windows check runs after the log closes: this line is not proof of a Windows start. */
   GuLog("TRANSACTION OK: hardware readbacks passed, DMA released; final pre-Windows check follows unlogged; benchmark still required\n");
-  stage="close-USB-log";s=GuBootClose();
-  if(s!=EFI_SUCCESS||Gu.fault){GuLog("log close status=%#llx; continuing\n",(unsigned long long)s);}
-  stage="final-Windows-verification";
-  if(!GuMsiReadyForWindows())GuLog("final verification FAILED; starting Windows anyway so the result can be measured\n");
+  stage="close-USB-log";s=GuBootClose();if(s!=EFI_SUCCESS||Gu.fault)goto failed;
+  stage="final-Windows-verification";if(!GuMsiReadyForWindows()){s=EFI_NOT_READY;goto failed;}
   stage="start-Windows";s=GuBootWindows();
   /* A returned Windows image is not a successful handoff. */
   GuBootHalt();return s==EFI_SUCCESS?EFI_ABORTED:s;
@@ -93,9 +91,19 @@ failed:
     if(Gu.started||Gu.master_attributes_pending)(VOID)GuClearMaster();
     (VOID)GuBootClose();GuBootHalt();return EFI_ABORTED;
   }
-  /* Hardware is quiescent. A failed gate must not cost another power cycle:
-   * stage Windows so the outcome can be measured with a real benchmark. */
-  GuLog("STOP was not contained; handing off to Windows for measurement\n");
+  /* Tolerate a refused gate only when a Windows image is actually staged. Before
+   * that point GuBootWindows() has nothing to start, so keep the upstream halt. */
+  /* Upstream refuses to start Windows from a failed run, and that is correct: a
+   * half-released GPU is not a state to hand to a driver. Only the final
+   * verification tolerates a negative result, because by then the transaction
+   * has completed and the hardware is quiescent.
+   * Halt only when something was actually mutated or is still live; otherwise
+   * return to the firmware so the boot order can move on. */
+  if(GuMsiMutated()||Gu.started||Gu.retained) {
+    if(Gu.started||Gu.master_attributes_pending)(VOID)GuClearMaster();
+    (VOID)GuBootClose();GuBootHalt();return EFI_ABORTED;
+  }
+  GuBootSay(L"\r\nRefused before the GPU was touched. Use Windows Boot Manager.\r\n");
   (VOID)GuBootClose();
-  return GuBootWindows();
+  return s;
 }

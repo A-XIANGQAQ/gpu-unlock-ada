@@ -58,6 +58,11 @@ static BOOLEAN Filter(const EDGE *e) {
   if(Stage>=2&&e->handle==H(394)&&e->agent==Agent(1)&&Guid(&e->protocol,&GopGuid))return TRUE;
   return Stage>=3&&e->handle==H(365)&&e->agent==Agent(2);
 }
+/* Same 24-byte PCI prefix as PciPath, then one ACPI ADR node and END, so the
+ * GpuChild() prefix-plus-structure matcher accepts it. */
+static const UINT8 GpuChildPath[]={
+  2,1,12,0,0xd0,0x41,3,10,0,0,0,0, 1,1,6,0,1,3, 1,1,6,0,0,0,
+  2,3,8,0, 0x70,3,1,0x80, 127,255,4,0};
 static EFI_STATUS EFIAPI Locate(EFI_LOCATE_SEARCH_TYPE kind,EFI_GUID *g,VOID *key,UINTN *count,EFI_HANDLE **h) {
   (void)key;*h=NULL;
   if(kind==AllHandles){*count=458;*h=malloc(*count*sizeof(**h));CHECK(*h);for(UINTN i=0;i<*count;i++)(*h)[i]=H(i);return EFI_SUCCESS;}
@@ -67,7 +72,7 @@ static EFI_STATUS EFIAPI Locate(EFI_LOCATE_SEARCH_TYPE kind,EFI_GUID *g,VOID *ke
 }
 static EFI_STATUS EFIAPI Handle(EFI_HANDLE h,EFI_GUID *g,VOID **p) {
   *p=NULL;
-  if(Guid(g,&PathGuid)){if(h==H(365))*p=(VOID *)PciPath;else if(h==H(394)&&Stage<3)*p=(VOID *)GopPath;}
+  if(Guid(g,&PathGuid)){if(h==H(365))*p=(VOID *)PciPath;else if(h==H(394)&&Stage<3)*p=(VOID *)GpuChildPath;}
   if(Guid(g,&PathGuid))for(UINTN i=0;i<ARRAY_SIZE(CapturedUsbPaths);i++)
     if(h==CapturedUsbPaths[i].handle)*p=(VOID *)CapturedUsbPaths[i].path;
   if(Guid(g,&PathGuid)&&(h==H(457)||h==H(456))&&Mode>=POINTER_LATE_OK)
