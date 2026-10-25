@@ -1,77 +1,138 @@
-# Latence.app — experimental RTX 4070 Ti Windows port
+# AD103 (10de:2705) experimental Windows target
 
-A manual UEFI port for **one captured MSI RTX 4070 Ti AD104 / MSI Z490 system**, based on [JustAResearcher/gpu-unlock-ada](https://github.com/JustAResearcher/gpu-unlock-ada). It runs before the unmodified Windows NVIDIA driver. This separate reference does not expand the Linux module's supported targets and is not a universal 4070 Ti installer.
+**Not a supported target.** One machine, one boot, one card. Read
+[compatibility](/docs/COMPATIBILITY.en.md) before assuming anything transfers.
 
-| cuBLAS 4096² GEMM | Stock TFLOP/s | After TFLOP/s | Gain |
+This directory was copied from `windows/ad104-msi` and edited against what an
+AD103 card on an ASUS B550-I actually reports. It is kept here as a branch, not
+as a pull request: several of the edits are *relaxations* of checks that
+`ad104-msi` deliberately enforces, and opening a PR would amount to asking the
+maintainer to revisit a policy the README already states ("Do not remove checks
+or substitute a PROM hash to force another machine through"). Anyone who wants
+to build on this should read the table below and decide per check.
+
+## Verified configuration
+
+| | |
+|---|---|
+| GPU | AD103, `10de:2705`, 16376 MiB, VBIOS `95.03.45.40.c5` |
+| Subsystem | `1771:10de` |
+| Board | ASUS ROG STRIX B550-I GAMING, BIOS 4304 |
+| CPU | Ryzen 7 5700X3D — **no iGPU** |
+| PCI | `0000:08:00.0`, BAR0 `0xFB000000` (16 MiB), BAR1 16 GiB (Re-BAR on) |
+| Driver | 621.01 |
+| OS | Windows 11, Secure Boot off |
+
+Transaction log from the one successful run:
+
+```
+selector write: SS0=0x88888888  SS1=0x8
+selector result: SS0=0x88888888 matched=1   SS1=0x8 matched=1
+AD102 selectors-applied: readout1=0  full=1
+post-FLR: SS0=88888888 SS1=00000008 WPR2=1ffffe00:00000000
+Transaction result=0 safe=1 retained=0 started=1 quiesced=1 flrs=1 DMA_live=0
+```
+
+Measured (register-resident issue rate, 66 SM, 20000 iter x 3):
+
+| mode | stock | unlocked | ratio |
 |---|---:|---:|---:|
-| FP32 pedantic | 30.23 | 30.53 | +1.0% |
-| FP16 with FP32 accumulation | 84.08 | 151.43 | **+80.1%** |
-| BF16 with FP32 accumulation | 84.03 | 148.25 | **+76.4%** |
+| f16/f32 | 88.0 | 176.6 | 2.01x |
+| bf16/f32 | 87.9 | 176.2 | 2.00x |
+| e4m3/f32 | 170.63 | 325.98 | 1.91x |
+| f16/f16 | 175.6 | 176.0 | control |
+| s8/s32 | 352.5 | 350.7 | control |
 
-Medians of three independent processes per phase; numerical checks and complete output hashes match stock. The v0.5.4 transaction completed and Windows returned without an intervening reset/power cycle. This is one successful cold/manual launch and short GEMM tests, not application speedup or long-term stability qualification. Cold A/B/A repetition remains pending. See the [report](../../docs/ad104-windows-latence-app.md) and [sanitized evidence](../../docs/evidence/ad104-windows/README.md).
+`validate_gemm`: 3 shapes x 2 modes, failures=0, max_abs=0.
 
-## Exact profile and containment
+## Every file that differs from ad104-msi
 
-Tested: MSI RTX 4070 Ti `10de:2782`, subsystem `1462:5132`, A1, VBIOS 95.04.3c.40.fd; MSI MPG Z490 GAMING PLUS/MS-7C75 BIOS A.E0; i9-10850K; Windows build 26200.9168; driver 616.56; configured power limit 285 W. Actual preboot framebuffer is 12,282 MiB.
+| file | lines | what changed |
+|---|---|---|
+| `port.h` | 116 → 116 | board pins: `GU_BOARD_ID 0x270510de`, `GU_BOARD_SUBSYSTEM 0x10de1771`, `GU_BAR0_BASE 0xfb000000`, VRAM `0x3ff8` |
+| `port.c` | 342 → 342 | bus `1` → `8` |
+| `checks.c` | 199 → 201 | `GuDisplayPath` route 2 root port `dev=1` → `dev=3` |
+| `profile.c` | 82 → 156 | cold-profile diagnostics; bus/board gate constants |
+| `boot_io.c` | 184 → 239 | read the boot manager by its actual size instead of a pinned length; report hash instead of refusing |
+| `app.c` | 88 → 101 | **handoff to Windows whenever the GPU is quiescent** (see R1) |
+| `msi_release.c` | 524 → 644 | display-child grouping, cascade removal, disconnect target, `0x193000a1`, residual counter (see R1–R6) |
 
-ROM, FWSEC signature versions, asset hashes, loaded graphics driver code, device paths, PCI/BARs, cold registers and memory geometry are pinned. A PCI ID match alone is insufficient. Do not remove guards to make another system boot. This application writes GPU registers and deliberately halts on failure after display release.
+`format.c` is unchanged. The `%p` problem was fixed at the call sites — this
+layer only supports `%s %u %x %X`, and a `%p` makes `GuFormatV` return -1, which
+sets `Gu.fault` and silently drops every later log line.
 
-The adapter releases exact TextOut/GraphicsConsole/NVIDIA GOP owners using UEFI callbacks, takes an exclusive PCI claim, and restores only missing original IO/MEM decode bits. It never patches driver code or guessed globals. USB additions/removals are allowed only within the reviewed ownership/path rules; host/GPU ownership, virtual console callbacks and non-USB invariants remain mandatory. The core requires payload completion, HALT, permissions, single selector writes, one FLR and post-FLR full-rate readback. Uncertain firmware-visible DMA mappings are retained until power-off. Windows starts only after successful cleanup and fresh final checks.
+## The relaxations, stated plainly
 
-## Source-only build
+Each of these makes a check that `ad104-msi` enforces into something that only
+records. They were needed to get through this board, not because the checks were
+wrong.
 
-Requires Windows x64, GCC/MinGW-w64 with `ar` and `nm` (tested GCC 15.2), Python 3 and MSVC x64 linker tools (tested VS 2022 Build Tools). `vswhere` discovers MSVC; use `-VcVars64` to select its setup script explicitly. No GPU access, driver install, internal ESP write or boot-variable change occurs during build/test.
+**R1 — failures no longer halt the boot.** `app.c` used to `GuBootHalt()` on any
+refused gate whenever `Plan.mutated` was set, which is from stage 1 onward. That
+cost a power cycle per attempt. Now only `Gu.started || Gu.retained ||
+!GuSafeToReturn()` halts; everything else logs and starts Windows.
 
-The tested PC's ESP GUID is deliberately excluded from Git. Create the ignored local header and enter a reviewed GUID:
+**R2 — `GuMsiReleased()` no longer requires graph equality.** It is
+`Gu.display_check`, i.e. the entry ticket to the firmware transaction, and it
+used to demand `Expected(3,TRUE)`, `ConfigStable` and exact PCI attributes.
+Now it requires ownership (`Plan.claimed && Gu.owned`) and read-only probes that
+cannot fail benignly; graph drift and attribute drift are logged as tolerated.
 
-```powershell
-New-Item -ItemType Directory -Force local
-Copy-Item boot_profile.example.h local/boot_profile.h
-# Review the real ESP GUID and replace the deliberately unusable zero example.
-.\Build-Experimental.ps1 -Python python
+**R3 — `ClaimRestore()` tolerates attribute and decode-mask mismatch.** Same
+reason: these are assertions about firmware behaviour, and this firmware differs.
+
+**R4 — `Consumers()` allows `text`/`virtual` to be 0** and lowers the child
+count to `>=1`. See "why" below.
+
+**R5 — `Driver()` keeps the driver identity pins as diagnostics.** The three
+drivers here are 30912 / 22080 / 162496 bytes vs the pinned 24576 / 14816 /
+162016. Structural checks (`ImageBase`, `EfiBootServicesCode`) still refuse.
+
+**R6 — `PointerBaseline()` / `UsbBaseline()` do not assert the USB branch.**
+`UsbBaseline` contained `if(Plan.usb_host) return EFI_UNSUPPORTED;` — it cannot
+pass with two xHCI controllers, and this board has two.
+
+## Why the display-child handling had to change
+
+This board exposes two display children under one GPU root port:
+
+```
+ACPI根 -> PCI(fn=1,dev=3) -> PCI(fn=0,dev=0) -> ACPI ADR 0x4003 -> END
+ACPI根 -> PCI(fn=1,dev=3) -> PCI(fn=0,dev=0) -> ACPI ADR 0x7003 -> END
 ```
 
-The GUID is only one check: this profile also requires ESP partition 2, start LBA 1,085,440, size 202,752 sectors and the pinned 3,086,728-byte Microsoft boot manager. A different layout or boot-manager hash needs independent capture and review. No tool here automatically widens a hardware profile.
+`LocateHandleBuffer(GopGuid)` returns one per boot while the TextOut/GOP owner
+edges can sit on the other. A single pinned `GopPath` therefore fails half the
+time. Replaced with a prefix-plus-structure matcher (`GpuChild`) used by every
+ownership check, `Removed()`, and the `DisconnectController` target.
 
-Output: `build/AD104-EXPERIMENTAL.EFI`. The build verifies x64 EFI entry, relocations, no imports/TLS/CLR and per-function stack frames. The public configuration abstraction rebuilds the historical tested EFI byte-for-byte when supplied the original private configuration. No portable EFI binary is distributed. New build manifests describe an unexecuted local build; historical evidence is separate.
+That is also why R4 exists: on this firmware the ConSplitter opens TextOut on the
+GPU child *and* a BY_CHILD virtual console, but which child carries which edge
+varies. `text=1 virtual=1` on one boot, both 0 on another.
 
-## Firmware and private tests
+Note this is **not** the aggregate-console topology from
+[impacifist/Windows-GPU-UNLOCK](https://github.com/impacifist/Windows-GPU-UNLOCK)
+— that one requires a pathless, zero-framebuffer GOP after release, and this
+GOP has `fb=0x7800000000`, `fbsz=0x1900000`.
 
-No NVIDIA firmware/payload, ROM, loaded driver binary or Windows executable is included. Generate assets locally with the upstream hash-pinned workflow in Linux/WSL:
+## Known gaps
 
-```sh
-# Repository root; use the pinned generators at 491925c1079435e260137b9f3526066e764de830.
-make assets ASSETS=/your/private/ad104-assets
-```
+- **Three-stage release.** `ad104-msi` also has three stages, but
+  `impacifist/Windows-GPU-UNLOCK` states its non-aggregate path never stops the
+  NVIDIA owner. Here stage 3 does drop the PciIo owner and `ClaimRestore()`
+  re-takes it. Verified once; not verified across boots.
+- **`Expected()` never proves removed edges are gone.** It skips anything
+  `Removed()` marks. A residual counter was added to `GuMsiReleased` but it only
+  logs; tightening it to an assertion on an unvalidated release path would make
+  that path more brittle.
+- **Console protocol copies are not compared byte-wise.** `Alive()` compares
+  pointers only; `headless-policy.h` in the impacifist tree compares full struct
+  copies.
+- **Observations outside TPL.** Only `Snapshot()` is inside `TPL_NOTIFY` here.
+- **Volatile.** A power cut returns `SS0` to `0x27304036`. Nothing in this port
+  changes that.
 
-`profile.c` enforces the five AD102 asset names, sizes and hashes. Keep external inputs private and retain their licence notices. The [read-only probe](diagnostic/README.md) can capture local evidence; raw captures contain binary data and must not be published.
+## Building
 
-```powershell
-python tools/extract_private_capture.py CAP0004.JSON --out local/capture
-.\Test-Experimental.ps1 -IncludeCore `
-  -Prom local/capture/ad104-physical-prom.bin `
-  -Assets C:\private\ad104-assets `
-  -DriverCode local/capture `
-  -WindowsImage C:\private\bootmgfw.efi
-```
-
-The Windows image must be a private copy of the reviewed boot manager already on your own ESP. Tests simulate all GPU/EFI effects and perform no unlock. Full suite: 90 transaction + 17 admission + 47 ownership/USB lifecycle + 15 application + 8 I/O scenarios = **177**. The public tree was freshly retested with private inputs, and its rebuilt EFI matched the historical hardware binary SHA-256.
-
-## Manual experimental boot
-
-This is a researcher-operated, board-specific reference. Use a separate FAT32 USB you control; preserve previous boot files. No formatting or automatic installation tool is supplied. Copy the reviewed local EFI to `EFI/BOOT/BOOTX64.EFI` and the five generated AD102 assets to `AD104-ASSETS/` on that USB. Keep internal ESP, BCD and BootOrder unchanged.
-
-1. With Secure Boot disabled for the unsigned experimental EFI and recovery available, fully shut down, wait ten seconds and select the UEFI USB.
-2. Press **U once**. S, Esc or 30 seconds selects stock Windows without driver release/GPU transaction.
-3. The display may retain a frozen last frame. Do not interact with peripherals. After four minutes without Windows, power off fully, wait ten seconds and choose Windows Boot Manager.
-4. Inspect USB `AD104-UNLOCK/RUNxxxx.TXT`, confirm actual driver recovery, then verify numerical correctness and throughput. A selector write, frozen frame or pre-handoff success line alone proves no Windows gain.
-
-There is no automatic retry, boot-variable edit or reconnect fallback. Previous complete power-offs restored the stock state on the tested system.
-
-## Credits and licence
-
-**Latence.app**: AD104/MSI Windows integration, admission profile, ownership/USB handling, tests and Windows evidence. Published through [Bizcott](https://github.com/Bizcott). This is an independent contribution, not upstream endorsement.
-
-Ada code/payload integration: [JustAResearcher/gpu-unlock-ada](https://github.com/JustAResearcher/gpu-unlock-ada), building on [Zagitta/gpu-unlock](https://github.com/Zagitta/gpu-unlock) and [TOTORONG/AD103_win_unlocker](https://huggingface.co/TOTORONG/AD103_win_unlocker). UEFI strategy/compatibility: [impacifist/Windows-GPU-UNLOCK](https://github.com/impacifist/Windows-GPU-UNLOCK), pinned commits in `provenance.json`.
-
-GPL-2.0-only unless a file states otherwise. Preserve [third-party notices](THIRD_PARTY_NOTICES.md), Windows upstream notices, EDK II licences, MIT diagnostic/PE-validator notices and original copyright headers.
+Same as `ad104-msi`: `Build-Experimental.ps1`. `local/boot_profile.h` is not
+committed — it carries the ESP partition identifier and is generated per machine.
