@@ -602,7 +602,19 @@ BOOLEAN GuMsiReleased(VOID) {
   else if(Gu.pci->Attributes(Gu.pci,EfiPciIoAttributeOperationGet,0,&attrs)!=EFI_SUCCESS||attrs!=Plan.attributes)
     GuLog("release: attributes %#llx vs %#llx (tolerated)\n",(unsigned long long)attrs,(unsigned long long)Plan.attributes);
   else if(Snapshot(&Current)!=EFI_SUCCESS)failed="graph-snapshot";
-  else if(!Expected(3,TRUE)){GuLog("release: graph drifted after release (tolerated)\n");GraphDiff(TRUE);}
+  else {
+    /* Expected() only proves that edges it did NOT expect to disappear are still
+     * present; it never proves the cascade actually removed the rest. Count what
+     * is still attached to the GPU root and to every display child. Reported,
+     * not enforced, so a firmware that leaves a benign residual still hands off. */
+    UINTN residual=0;
+    for(UINTN i=0;i<Current.count;i++) {
+      const EDGE *e=&Current.edges[i];
+      if(e->handle==Plan.pci||GpuChild(e->handle))residual++;
+    }
+    GuLog("release: residual edges on GPU handles=%zu expected=0\n",(size_t)residual);
+    if(!Expected(3,TRUE)){GuLog("release: graph drifted after release (tolerated)\n");GraphDiff(TRUE);}
+  }
   if(failed)NOTE("GPU release check failed: %s attributes=%#llx expected=%#llx graph=%zu original=%zu fault=%u flrs=%u\n",
     failed,(unsigned long long)attrs,(unsigned long long)Plan.attributes,(size_t)Current.count,(size_t)Original.count,Gu.fault,Gu.flrs);
   if(!failed)ReportAdditions();
