@@ -9,6 +9,7 @@ EFI_STATUS GuBootWindows(VOID);
 EFI_STATUS GuBootClose(VOID);
 VOID GuBootSay(const CHAR16 *);
 VOID GuBootSilence(VOID);
+VOID GuBootWake(VOID);
 VOID GuBootHalt(VOID);
 /* v0.5.4: diagnostics log only while the USB log is open (GuLog faults otherwise). */
 BOOLEAN GuBootLogOpen(VOID);

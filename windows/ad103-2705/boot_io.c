@@ -13,7 +13,7 @@
 static EFI_SYSTEM_TABLE *Table;
 static EFI_HANDLE Self,Windows,OwnVolume;
 static EFI_FILE_PROTOCOL *Root,*Log;
-static BOOLEAN Silent;
+static BOOLEAN Silent,Sealed;
 static EFI_GUID LoadedGuid=EFI_LOADED_IMAGE_PROTOCOL_GUID,FsGuid=EFI_SIMPLE_FILE_SYSTEM_PROTOCOL_GUID;
 static EFI_GUID PathGuid=EFI_DEVICE_PATH_PROTOCOL_GUID,InfoGuid=EFI_FILE_INFO_ID;
 static const EFI_GUID WindowsPartition=GU_WINDOWS_PARTITION_INITIALIZER;
@@ -52,10 +52,21 @@ VOID GuBootSay(const CHAR16 *text) {
     Table->ConOut->OutputString(Table->ConOut,(CHAR16 *)text);
 }
 VOID GuBootSilence(VOID){Silent=TRUE;}
+/* The transaction silences the console because the display driver is being
+ * unloaded underneath it. Every terminal path has to undo that first: a halt
+ * the operator cannot see is indistinguishable from a hang, and the habitual
+ * fix for a hang is a reset, which clears the volatile selectors. */
+VOID GuBootWake(VOID){Silent=FALSE;}
 VOID GuLog(const char *format,...) {
+  /* Logging is diagnostics, not a hardware condition. Once the volume is closed
+   * on purpose, a write cannot happen and must not be recorded as a fault: the
+   * caller's Gu.fault checks run *after* close, so a purposeful close would
+   * otherwise poison every later gate and refuse a handoff that is already
+   * correct. */
+  if(Sealed||!Log)return;
   CHAR8 buffer[2048];va_list args;va_start(args,format);
   size_t n=GuFormatV(buffer,sizeof(buffer),format,args);va_end(args);
-  if(n==(size_t)-1||n>=sizeof(buffer)||!Log){Gu.fault=TRUE;return;}
+  if(n==(size_t)-1||n>=sizeof(buffer)){Gu.fault=TRUE;return;}
   UINTN bytes=n;EFI_STATUS s=Log->Write(Log,&bytes,buffer);
   if(s!=EFI_SUCCESS||bytes!=n||Log->Flush(Log)!=EFI_SUCCESS)Gu.fault=TRUE;
 }
@@ -253,6 +264,9 @@ EFI_STATUS GuBootClose(VOID) {
   EFI_STATUS s=EFI_SUCCESS;
   if(Log){s=Log->Flush(Log);EFI_STATUS closed=Log->Close(Log);Log=NULL;if(s==EFI_SUCCESS)s=closed;}
   if(Root){EFI_STATUS closed=Root->Close(Root);Root=NULL;if(s==EFI_SUCCESS)s=closed;}
+  /* Seal only after a clean close: a failed close is a real fault and must still
+   * be able to report itself. */
+  if(s==EFI_SUCCESS)Sealed=TRUE;
   return s;
 }
 EFI_STATUS GuBootWindows(VOID) {
@@ -260,6 +274,7 @@ EFI_STATUS GuBootWindows(VOID) {
   return Table->BootServices->StartImage(Windows,NULL,NULL);
 }
 VOID GuBootHalt(VOID) {
+  GuBootWake();
   GuBootSay(L"\r\nSTOPPED. Power OFF fully; next boot use Windows Boot Manager.\r\n");
   for(;;)__asm__ volatile("pause");
 }

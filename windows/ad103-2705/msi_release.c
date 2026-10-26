@@ -22,6 +22,11 @@ typedef struct {UINTN count;EDGE edges[MAX_EDGES];} GRAPH;
 typedef struct {
   EFI_SYSTEM_TABLE *table;EFI_HANDLE self,pci,gop,gop_text,gop_gfx,out_agent,gfx_agent,nv_agent;
   EFI_HANDLE console,input,error,pointer_agent,key_agent,usb_host,usb_agent;
+  /* Stage 3 unloads the console/GOP drivers, which removes the device path from
+   * the very handles the cascade then destroys. Their identity must therefore be
+   * recorded while the path protocol is still present, or Removed()/Expected()
+   * cannot tell "cascade removed it" from "an unexpected disappearance". */
+  EFI_HANDLE gpu_child[8];UINTN gpu_child_count;
   EFI_SIMPLE_TEXT_OUTPUT_PROTOCOL *text,*err;
   EFI_SIMPLE_TEXT_INPUT_PROTOCOL *keys;
   UINTN key_reset,key_read;EFI_EVENT key_wait;
@@ -75,7 +80,7 @@ static BOOLEAN Path(EFI_HANDLE h,const UINT8 *bytes,UINTN count) {
  * (captured: ACPI ADR 0x4003 and 0x7003). Both belong to the GPU, and the
  * TextOut/GOP owner edges may sit on either one, so ownership checks must
  * accept any path whose 24-byte PCI prefix equals PciPath (END stripped). */
-static BOOLEAN GpuChild(EFI_HANDLE h) {
+static BOOLEAN PathGpuChild(EFI_HANDLE h) {
   EFI_DEVICE_PATH_PROTOCOL *p=NULL;
   if(Interface(h,&PathGuid,(VOID **)&p)!=EFI_SUCCESS||!p)return FALSE;
   if(!Equal(p,PciPath,sizeof(PciPath)-4))return FALSE;
@@ -88,6 +93,32 @@ static BOOLEAN GpuChild(EFI_HANDLE h) {
     at+=len;
   }
   return FALSE;
+}
+/* Identity, not path, decides ownership after stage 3. DisconnectController
+ * unloads the console and GOP drivers, which strips the device path from these
+ * handles before the cascade frees them; a path-only test then reports every
+ * GPU edge as "missing" and the handoff stalls on a correct graph. The cache is
+ * filled in GuMsiPreflight() while the paths still exist. */
+static BOOLEAN GpuChild(EFI_HANDLE h) {
+  if(!h)return FALSE;
+  for(UINTN i=0;i<Plan.gpu_child_count;i++)
+    if(Plan.gpu_child[i]==h)return TRUE;
+  return PathGpuChild(h);
+}
+/* Record every GPU display child while its device path is still readable.
+ * Runs once, before the first DisconnectController. */
+static EFI_STATUS CacheGpuChildren(VOID) {
+  EFI_BOOT_SERVICES *b=Plan.table->BootServices;EFI_HANDLE *handles=NULL;UINTN count=0;
+  EFI_STATUS s=b->LocateHandleBuffer(AllHandles,NULL,NULL,&count,&handles);
+  if(s==EFI_SUCCESS&&(!handles||!count||count>4096))s=EFI_BAD_BUFFER_SIZE;
+  for(UINTN i=0;s==EFI_SUCCESS&&i<count;i++) {
+    if(!PathGpuChild(handles[i]))continue;
+    if(Plan.gpu_child_count==sizeof(Plan.gpu_child)/sizeof(Plan.gpu_child[0])){s=EFI_BUFFER_TOO_SMALL;break;}
+    Plan.gpu_child[Plan.gpu_child_count++]=handles[i];
+  }
+  if(handles&&b->FreePool(handles)!=EFI_SUCCESS)s=EFI_DEVICE_ERROR;
+  GuLog("GPU children cached: count=%zu\n",(size_t)Plan.gpu_child_count);
+  return s;
 }
 static EFI_STATUS Snapshot(GRAPH *g) {
   EFI_BOOT_SERVICES *b=Plan.table->BootServices;EFI_HANDLE *handles=NULL;UINTN count=0;g->count=0;
@@ -510,6 +541,7 @@ EFI_STATUS GuMsiPreflight(EFI_SYSTEM_TABLE *t,EFI_HANDLE self,EFI_HANDLE pci) {
     s=EFI_NOT_READY;
   }
   if(s==EFI_SUCCESS){s=Snapshot(&Original);GuLog("preflight[6] Snapshot=%#llx edges=%zu\n",(unsigned long long)s,(size_t)Original.count);}
+  if(s==EFI_SUCCESS){s=CacheGpuChildren();GuLog("preflight[6b] CacheGpuChildren=%#llx children=%zu\n",(unsigned long long)s,(size_t)Plan.gpu_child_count);}
   if(s==EFI_SUCCESS){s=Consumers();GuLog("preflight[7] Consumers=%#llx\n",(unsigned long long)s);}
   if(s==EFI_SUCCESS){s=PointerBaseline();GuLog("preflight[8] PointerBaseline=%#llx\n",(unsigned long long)s);}
   if(s==EFI_SUCCESS){s=UsbBaseline();GuLog("preflight[9] UsbBaseline=%#llx\n",(unsigned long long)s);}
@@ -633,6 +665,10 @@ BOOLEAN GuMsiMutated(VOID){return Plan.mutated;}
 BOOLEAN GuMsiReadyForWindows(VOID) {
   if(!Plan.ready||Plan.stage!=3||Plan.claimed||Gu.owned||Gu.fault||!Gu.quiesced||Gu.flrs!=1||!GuSafeToReturn())return FALSE;
   UINT32 c[64];
+  /* The graph verdict is meaningful only because CacheGpuChildren() recorded the
+   * display children before stage 3 removed their device paths. Without that
+   * cache every GPU edge looks "missing" once the drivers are unloaded on
+   * purpose, which is what stopped both earlier runs. */
   if(Alive()!=EFI_SUCCESS||Gops(FALSE)!=EFI_SUCCESS||ReadConfig(c)!=EFI_SUCCESS||!ConfigStable(c)||
      Snapshot(&Current)!=EFI_SUCCESS||!Expected(3,FALSE))return FALSE;
   /* Fresh status after USB Close and before StartImage; no log callbacks. */

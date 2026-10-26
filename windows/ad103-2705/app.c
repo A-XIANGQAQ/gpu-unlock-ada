@@ -80,10 +80,13 @@ EFI_STATUS EFIAPI UefiMain(EFI_HANDLE image,EFI_SYSTEM_TABLE *t) {
       (unsigned long long)s,(unsigned)Gu.owned,(unsigned)GuSafeToReturn());
     if(Gu.owned||!GuSafeToReturn()){s=EFI_DEVICE_ERROR;goto failed;}
   }
-  /* The final pre-Windows check runs after the log closes: this line is not proof of a Windows start. */
-  GuLog("TRANSACTION OK: hardware readbacks passed, DMA released; final pre-Windows check follows unlogged; benchmark still required\n");
-  stage="close-USB-log";s=GuBootClose();if(s!=EFI_SUCCESS||Gu.fault)goto failed;
+  /* Verify while the log is still open so a refusal is recorded. Previously the
+   * close came first, which made the final gate unobservable: a stop here left a
+   * log ending in "TRANSACTION OK" and no reason, and an unexplained stop is
+   * indistinguishable from a hang for whoever is watching the screen. */
   stage="final-Windows-verification";if(!GuMsiReadyForWindows()){s=EFI_NOT_READY;goto failed;}
+  GuLog("TRANSACTION OK: hardware readbacks passed, DMA released; handoff check passed; benchmark still required\n");
+  stage="close-USB-log";s=GuBootClose();if(s!=EFI_SUCCESS||Gu.fault)goto failed;
   stage="start-Windows";s=GuBootWindows();
   /* A returned Windows image is not a successful handoff. */
   GuBootHalt();return s==EFI_SUCCESS?EFI_ABORTED:s;

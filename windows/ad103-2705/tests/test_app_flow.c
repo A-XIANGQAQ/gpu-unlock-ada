@@ -38,7 +38,9 @@ BOOLEAN GuSafeToReturn(VOID){return TRUE;}
 EFI_STATUS GuMsiFinish(VOID){CHECK(Transactions&&Gu.quiesced);Finishes++;EFI_STATUS s=Tick(10);if(s==EFI_SUCCESS)Gu.owned=FALSE;return s;}
 EFI_STATUS GuClearMaster(VOID){CHECK(Mutated);return EFI_SUCCESS;}
 BOOLEAN GuMsiMutated(VOID){return Mutated;}
-BOOLEAN GuMsiReadyForWindows(VOID){CHECK(Closes==1&&!Gu.owned&&Gu.quiesced);return Case!=12;}
+/* The handoff check runs *before* the log is closed so that a refusal is
+ * recorded; a stop after the close used to leave no trace at all. */
+BOOLEAN GuMsiReadyForWindows(VOID){CHECK(Closes==0&&!Gu.owned&&Gu.quiesced);return Case!=12;}
 EFI_STATUS GuBootClose(VOID){Closes++;return Case==11?EFI_DEVICE_ERROR:EFI_SUCCESS;}
 EFI_STATUS GuBootWindows(VOID){WindowsCalls++;if(Case)CHECK(Calls==10&&!Gu.owned&&Transactions==1&&Finishes==1);else CHECK(!Releases&&!Transactions&&!Finishes);return EFI_ABORTED;}
 VOID GuBootHalt(VOID){CHECK(Mutated);longjmp(Escape,1);}
