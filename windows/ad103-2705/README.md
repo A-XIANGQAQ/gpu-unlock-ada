@@ -129,8 +129,12 @@ GOP has `fb=0x7800000000`, `fbsz=0x1900000`.
   pointers only; `headless-policy.h` in the impacifist tree compares full struct
   copies.
 - **Observations outside TPL.** Only `Snapshot()` is inside `TPL_NOTIFY` here.
-- **Volatile.** A power cut returns `SS0` to `0x27304036`. Nothing in this port
-  changes that.
+- **Volatile.** A power cut clears the override: `SS1` returns to `0x1` and
+  `readout1` back to `full=0`. `SS0` itself comes back as a *different* value on
+  every cold boot — `0x6310036`, `0x7300036`, `0x5305036`, `0x7300036` across
+  RUN0001/0002/0004/0005 — so never compare it by equality. The one read-only
+  probe sample of `0x27304036` is a single observation, not the stock constant.
+  Nothing in this port changes that.
 
 ## Building
 
