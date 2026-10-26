@@ -29,11 +29,16 @@ static BOOLEAN Inspect(const EFI_DEVICE_PATH_PROTOCOL *p,UINTN *size,BOOLEAN *us
     if(n<4||n>4096-at)return FALSE;
     if(p->Type==END_DEVICE_PATH_TYPE) {
       if(n!=4||p->SubType!=END_ENTIRE_DEVICE_PATH_SUBTYPE)return FALSE;
+      if(hd>16)return FALSE;   /* sane bound on repeated harddrive nodes */
       *size=at+4;return TRUE;
     }
     if(p->Type==MESSAGING_DEVICE_PATH&&p->SubType==MSG_USB_DP&&n==sizeof(USB_DEVICE_PATH))*usb=TRUE;
     if(p->Type==MEDIA_DEVICE_PATH&&p->SubType==MEDIA_HARDDRIVE_DP) {
-      if(n!=sizeof(HARDDRIVE_DEVICE_PATH)||++hd!=1)return FALSE;
+      if(n!=sizeof(HARDDRIVE_DEVICE_PATH))return FALSE;
+      /* A volume path may carry more than one harddrive node. Match the one that
+       * names the Windows ESP instead of refusing the second node: an internal
+       * ESP boot was exiting silently here while the same code worked from USB. */
+      hd++;
       const HARDDRIVE_DEVICE_PATH *d=(const VOID *)p;
       if(d->MBRType==2&&d->SignatureType==2&&d->PartitionNumber==1&&d->PartitionStart==2048&&
          d->PartitionSize==614400&&!memcmp(d->Signature,&WindowsPartition,16))*windows=TRUE;
@@ -63,17 +68,34 @@ EFI_STATUS GuBootOpen(EFI_HANDLE image,EFI_SYSTEM_TABLE *t) {
   EFI_BOOT_SERVICES *b=t->BootServices;EFI_LOADED_IMAGE_PROTOCOL *loaded=NULL;
   EFI_SIMPLE_FILE_SYSTEM_PROTOCOL *fs=NULL;EFI_DEVICE_PATH_PROTOCOL *path=NULL;
   EFI_STATUS s=b->HandleProtocol(image,&LoadedGuid,(VOID **)&loaded);
-  if(s!=EFI_SUCCESS||!loaded||!loaded->DeviceHandle)return EFI_UNSUPPORTED;
+  if(s!=EFI_SUCCESS||!loaded||!loaded->DeviceHandle){
+    t->ConOut->OutputString(t->ConOut,L"\r\nAD104: no loaded-image handle.\r\n");
+    return EFI_UNSUPPORTED;
+  }
   OwnVolume=loaded->DeviceHandle;s=b->HandleProtocol(OwnVolume,&PathGuid,(VOID **)&path);
   UINTN length=0;BOOLEAN usb=FALSE,windows=FALSE;
   /* Upstream required a USB stick. This port also runs from the internal ESP so
    * the unlock can be unattended; assets and the log then live on that ESP. */
-  if(s!=EFI_SUCCESS||!Inspect(path,&length,&usb,&windows))return EFI_ACCESS_DENIED;
-  s=b->HandleProtocol(OwnVolume,&FsGuid,(VOID **)&fs);if(s!=EFI_SUCCESS||!fs)return EFI_UNSUPPORTED;
-  s=fs->OpenVolume(fs,&Root);if(s!=EFI_SUCCESS||!Root)return EFI_DEVICE_ERROR;
+  if(s!=EFI_SUCCESS||!Inspect(path,&length,&usb,&windows)){
+    t->ConOut->OutputString(t->ConOut,L"\r\nAD104: own volume has no usable device path.\r\n");
+    return EFI_ACCESS_DENIED;
+  }
+  s=b->HandleProtocol(OwnVolume,&FsGuid,(VOID **)&fs);
+  if(s!=EFI_SUCCESS||!fs){
+    t->ConOut->OutputString(t->ConOut,L"\r\nAD104: own volume exposes no SimpleFileSystem.\r\n");
+    return EFI_UNSUPPORTED;
+  }
+  s=fs->OpenVolume(fs,&Root);
+  if(s!=EFI_SUCCESS||!Root){
+    t->ConOut->OutputString(t->ConOut,L"\r\nAD104: OpenVolume failed on own volume.\r\n");
+    return EFI_DEVICE_ERROR;
+  }
   EFI_FILE_PROTOCOL *dir=NULL;
   s=Root->Open(Root,&dir,L"\\AD104-UNLOCK",EFI_FILE_MODE_READ|EFI_FILE_MODE_WRITE|EFI_FILE_MODE_CREATE,EFI_FILE_DIRECTORY);
-  if(s!=EFI_SUCCESS||!dir)return EFI_DEVICE_ERROR;
+  if(s!=EFI_SUCCESS||!dir){
+    t->ConOut->OutputString(t->ConOut,L"\r\nAD104: cannot create \\AD104-UNLOCK on own volume (read-only?).\r\n");
+    return EFI_DEVICE_ERROR;
+  }
   for(UINTN slot=1;slot<=9999;slot++) {
     CHAR16 name[]=L"RUN0000.TXT";UINTN number=slot;
     for(UINTN at=7;at>3;){at--;name[at]=(CHAR16)('0'+number%10);number/=10;}
@@ -82,7 +104,11 @@ EFI_STATUS GuBootOpen(EFI_HANDLE image,EFI_SYSTEM_TABLE *t) {
     if(s!=EFI_NOT_FOUND)break;
     s=dir->Open(dir,&Log,name,EFI_FILE_MODE_READ|EFI_FILE_MODE_WRITE|EFI_FILE_MODE_CREATE,0);break;
   }
-  EFI_STATUS closed=dir->Close(dir);if(s!=EFI_SUCCESS||!Log)return s==EFI_SUCCESS?EFI_OUT_OF_RESOURCES:s;
+  EFI_STATUS closed=dir->Close(dir);
+  if(s!=EFI_SUCCESS||!Log){
+    t->ConOut->OutputString(t->ConOut,L"\r\nAD104: cannot create RUNxxxx.TXT.\r\n");
+    return s==EFI_SUCCESS?EFI_OUT_OF_RESOURCES:s;
+  }
   if(closed!=EFI_SUCCESS)return closed;
   if(!b->SetWatchdogTimer)return EFI_UNSUPPORTED;
   return b->SetWatchdogTimer(0,0,0,NULL);

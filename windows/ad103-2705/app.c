@@ -72,8 +72,13 @@ EFI_STATUS EFIAPI UefiMain(EFI_HANDLE image,EFI_SYSTEM_TABLE *t) {
   }
   stage="release-exclusive-claim";s=GuMsiFinish();
   if(s!=EFI_SUCCESS||Gu.fault){
-    GuLog("finish incomplete status=%#llx\n",(unsigned long long)s);
-    goto failed;
+    /* GuMsiFinish() closes the exclusive claim first and only then compares the
+     * graph, so a non-zero status here usually means "claim released, graph
+     * drifted". Treat an unreleased claim or live DMA as fatal; a drifted graph
+     * after a clean close is not a reason to strand the machine. */
+    GuLog("finish incomplete status=%#llx owned=%u safe=%u\n",
+      (unsigned long long)s,(unsigned)Gu.owned,(unsigned)GuSafeToReturn());
+    if(Gu.owned||!GuSafeToReturn()){s=EFI_DEVICE_ERROR;goto failed;}
   }
   /* The final pre-Windows check runs after the log closes: this line is not proof of a Windows start. */
   GuLog("TRANSACTION OK: hardware readbacks passed, DMA released; final pre-Windows check follows unlogged; benchmark still required\n");
