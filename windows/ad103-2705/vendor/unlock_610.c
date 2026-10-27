@@ -1294,11 +1294,11 @@ static int unlock_transaction_gfw(struct unlock_transaction_work *work)
 				dev_err(&work->pdev->dev, "card already initialised since power on (WPR2 enabled); power off first\n");
 				return GU_RESULT(-EBUSY);
 			}
-            /* The entry state this transaction expects is either stock
-             * (SS1 = 1) or blank (SS0 = SS1 = 0, seen only with a loaded
-             * VBIOS override; see profile.c Registers()). Both leave SS0
-             * distinct from the unlock value, so the write below still has
-             * somewhere to go. */
+            /* Two entry states are accepted, both seen on this card: stock
+             * (SS1 = 1, RUN0001..RUN0006, one of them with a loaded override)
+             * and blank (SS0 = SS1 = 0, six boots RUN0007..RUN0012 with the
+             * 320 W default override). The logs do not say which side causes
+             * blank. Both keep SS0 off the unlock value; see profile.c. */
             if (!Gu.profile_verified || !GuEntrySelectorsMatch(ss0,ss1) ||
                 inaccessible(ss0) || ss0==GU_SS0_UNLOCK ||
                 !(ss1==1 || (ss0==0 && ss1==0)) ||
