@@ -550,7 +550,7 @@ int main(int argc,char **argv) {
   for(UINTN i=0;i<5;i++)free((VOID *)GuAssets[i].firmware.data);
   printf("%u real core + compat + UEFI port scenarios passed; all PCI/MMIO/DMA/firmware execution simulated.\n",
 #ifdef GU_ENTRY_LATCHED
-    SCENARIO_COUNT*3
+    SCENARIO_COUNT*4
 #else
     SCENARIO_COUNT
 #endif

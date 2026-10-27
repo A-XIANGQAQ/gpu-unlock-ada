@@ -566,7 +566,7 @@ static EFI_STATUS ClaimRestore(VOID) {
   if(s==EFI_SUCCESS)s=ReadConfig(c);
   if(s==EFI_SUCCESS&&!DecodeMask(c,&mask))s=EFI_NOT_READY;
   if(s==EFI_SUCCESS)s=Snapshot(&Current);
-  if(s==EFI_SUCCESS&&!Expected(3,FALSE)){GuLog("claim restore pre-graph drifted; continuing\n");}
+  if(s==EFI_SUCCESS&&!Expected(3,FALSE))s=EFI_NOT_READY;
   if(s==EFI_SUCCESS)s=b->OpenProtocol(Plan.pci,&PciGuid,(VOID **)&io,Plan.self,NULL,EFI_OPEN_PROTOCOL_EXCLUSIVE);
   if(s==EFI_SUCCESS){Plan.claimed=TRUE;Gu.owned=TRUE;if(io!=Gu.pci)s=EFI_COMPROMISED_DATA;}
   if(s==EFI_SUCCESS)s=io->Attributes(io,EfiPciIoAttributeOperationGet,0,&attrs);
@@ -574,7 +574,7 @@ static EFI_STATUS ClaimRestore(VOID) {
   if(s==EFI_SUCCESS)s=io->Attributes(io,EfiPciIoAttributeOperationSupported,0,&supported);
   if(s==EFI_SUCCESS&&(supported&mask)!=mask)GuLog("decode mask %#llx unsupported mask %#llx; continuing\n",(unsigned long long)mask,(unsigned long long)supported);
   if(s==EFI_SUCCESS)s=Snapshot(&Current);
-  if(s==EFI_SUCCESS&&!Expected(3,TRUE))GuLog("claim graph drifted after exclusive open; continuing\n");
+  if(s==EFI_SUCCESS&&!Expected(3,TRUE))s=EFI_NOT_READY;
   if(s==EFI_SUCCESS&&mask)s=io->Attributes(io,EfiPciIoAttributeOperationEnable,mask,NULL);
   b->RestoreTPL(old);
   if(s==EFI_SUCCESS)s=ReadConfig(c);
@@ -597,7 +597,7 @@ EFI_STATUS GuMsiRelease(VOID) {
     if(s==EFI_SUCCESS)s=Gops(FALSE);
     EFI_TPL old=b->RaiseTPL(TPL_NOTIFY);
     if(s==EFI_SUCCESS)s=Snapshot(&Current);
-    if(s==EFI_SUCCESS&&!Expected(stage-1,FALSE)){GuLog("stage %zu pre-graph drifted; continuing\n",(size_t)stage);}
+    if(s==EFI_SUCCESS&&!Expected(stage-1,FALSE))s=EFI_NOT_READY;
     if(s==EFI_SUCCESS)s=Driver(stage-1);
     b->RestoreTPL(old);
     if(s!=EFI_SUCCESS||Gu.fault)return s==EFI_SUCCESS?EFI_DEVICE_ERROR:s;
@@ -613,9 +613,9 @@ EFI_STATUS GuMsiRelease(VOID) {
     if(s!=EFI_SUCCESS||Gu.fault)return s==EFI_SUCCESS?EFI_DEVICE_ERROR:s;
     Plan.stage=stage;
     s=Snapshot(&Current);
-    if(s==EFI_SUCCESS&&!Expected(stage,FALSE)){GuLog("stage %zu post-graph drifted; continuing\n",(size_t)stage);}
-    if(s==EFI_SUCCESS&&Alive()!=EFI_SUCCESS){GuLog("stage %zu console changed; continuing\n",(size_t)stage);}
-    if(s==EFI_SUCCESS&&Gops(FALSE)!=EFI_SUCCESS){GuLog("stage %zu gop enumeration failed; continuing\n",(size_t)stage);}
+    if(s==EFI_SUCCESS&&!Expected(stage,FALSE))s=EFI_NOT_READY;
+    if(s==EFI_SUCCESS)s=Alive();
+    if(s==EFI_SUCCESS)s=Gops(FALSE);
     if(s!=EFI_SUCCESS)return s;
   }
   EFI_STATUS s=ClaimRestore();
@@ -630,9 +630,8 @@ BOOLEAN GuMsiReleased(VOID) {
   else if(ReadConfig(c)!=EFI_SUCCESS)failed="config-read";
   else if(Alive()!=EFI_SUCCESS)failed="console";
   else if(Gops(FALSE)!=EFI_SUCCESS)failed="GOP";
-  else if(!ConfigStable(c))GuLog("release: pci config drifted (tolerated)\n");
-  else if(Gu.pci->Attributes(Gu.pci,EfiPciIoAttributeOperationGet,0,&attrs)!=EFI_SUCCESS||attrs!=Plan.attributes)
-    GuLog("release: attributes %#llx vs %#llx (tolerated)\n",(unsigned long long)attrs,(unsigned long long)Plan.attributes);
+  else if(!ConfigStable(c))failed="config-drift";
+  else if(Gu.pci->Attributes(Gu.pci,EfiPciIoAttributeOperationGet,0,&attrs)!=EFI_SUCCESS||attrs!=Plan.attributes)failed="attributes";
   else if(Snapshot(&Current)!=EFI_SUCCESS)failed="graph-snapshot";
   else {
     /* Expected() only proves that edges it did NOT expect to disappear are still
@@ -645,7 +644,7 @@ BOOLEAN GuMsiReleased(VOID) {
       if(e->handle==Plan.pci||GpuChild(e->handle))residual++;
     }
     GuLog("release: residual edges on GPU handles=%zu expected=0\n",(size_t)residual);
-    if(!Expected(3,TRUE)){GuLog("release: graph drifted after release (tolerated)\n");GraphDiff(TRUE);}
+    if(!Expected(3,TRUE)){GraphDiff(TRUE);failed="graph";}
   }
   if(failed)NOTE("GPU release check failed: %s attributes=%#llx expected=%#llx graph=%zu original=%zu fault=%u flrs=%u\n",
     failed,(unsigned long long)attrs,(unsigned long long)Plan.attributes,(size_t)Current.count,(size_t)Original.count,Gu.fault,Gu.flrs);

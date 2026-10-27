@@ -12,11 +12,12 @@ static VOID fresh(VOID) {
   Device=(struct pci_dev){.vendor=0x10de,.device=0x2705,
     .dev={.dma_mask=&Mask,.coherent_dma_mask=0xfffffffffULL},.pm_cap=0x60,.refs=1};
 }
+static unsigned Cases;
 static VOID rejected(const char *name,struct gpu_unlock_610_shared *shared) {
   CHECK(gpu_unlock_610_unlock(&Device,shared)!=0);
   CHECK(!Gu.started && !fake.mmio_writes && !fake.gsp_starts && !fake.sec2_starts && !fake.flrs);
   CHECK(!fake.live_maps && !fake.live_buffers && !Gu.allocations);
-  CHECK(!fake.master_enables);printf("AD104 guard %s PASS\n",name);
+  CHECK(!fake.master_enables);Cases++;printf("AD104 guard %s PASS\n",name);
 }
 int main(int argc,char **argv) {
   CHECK(argc==3);load_fixture_assets(argv[1],argv[2]);
@@ -54,5 +55,7 @@ int main(int argc,char **argv) {
     gpu_unlock_610_release_shared(&shared);dispose_host_fixture();
   }
   for(UINTN i=0;i<5;i++)free((VOID *)GuAssets[i].firmware.data);
-  puts("17 admission cases PASS; all hardware operations simulated.");return 0;
+  char buf[96];
+  snprintf(buf,sizeof(buf),"%u admission cases PASS; all hardware operations simulated.",Cases);
+  puts(buf);return 0;
 }

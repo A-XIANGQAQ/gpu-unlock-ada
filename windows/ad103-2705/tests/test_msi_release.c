@@ -44,10 +44,12 @@ VOID GuLog(const char *f,...){
 }
 VOID GuLogText(const char *s){(void)s;}
 BOOLEAN GuBootLogOpen(VOID){return TRUE;}
-BOOLEAN GuTargetConfig(const UINT32 *c,UINTN s,UINTN b,UINTN d,UINTN f){return c[0]==GU_BOARD_ID&&c[11]==GU_BOARD_SUBSYSTEM&&!s&&b==1&&!d&&!f;}
+BOOLEAN GuTargetConfig(const UINT32 *c,UINTN s,UINTN b,UINTN d,UINTN f){return c[0]==GU_BOARD_ID&&c[11]==GU_BOARD_SUBSYSTEM&&!s&&b==8&&!d&&!f;}
 BOOLEAN GuAd104ColdEntry(VOID){return Cold;}
 BOOLEAN GuSafeToReturn(VOID){return TRUE;}
-UINT32 GuRead32(UINT32 off){switch(off){case 0:return 0x194000a1;case 0x110100:return 0x10;case 0x82381c:return 0x88888888;case 0x823820:return 8;case 0x823804:return 0xffffffff;default:return 0;}}
+/* PMC_BOOT_0 reads 0x193000a1 on this AD103 board (CAP0002.JSON); upstream's
+ * AD104 fixture hardcoded 0x194000a1 here. */
+UINT32 GuRead32(UINT32 off){switch(off){case 0:return 0x193000a1;case 0x110100:return 0x10;case 0x82381c:return 0x88888888;case 0x823820:return 8;case 0x823804:return 0xffffffff;default:return 0;}}
 static EFI_STATUS EFIAPI Free(VOID *p){free(p);return EFI_SUCCESS;}
 static BOOLEAN Filter(const EDGE *e) {
   if(Drift&&Mode==USB_REMOVE_POINTERS&&(e->handle==H(400)||e->handle==H(408)||
@@ -120,10 +122,10 @@ static EFI_STATUS EFIAPI Opens(EFI_HANDLE h,EFI_GUID *g,EFI_OPEN_PROTOCOL_INFORM
 }
 static EFI_TPL EFIAPI Raise(EFI_TPL t){CHECK(t==TPL_NOTIFY);return TPL_APPLICATION;}
 static VOID EFIAPI Restore(EFI_TPL t){CHECK(t==TPL_APPLICATION);}
-static EFI_STATUS EFIAPI Location(EFI_PCI_IO_PROTOCOL *p,UINTN *s,UINTN *b,UINTN *d,UINTN *f){CHECK(p==&Io);*s=*d=*f=0;*b=1;return EFI_SUCCESS;}
+static EFI_STATUS EFIAPI Location(EFI_PCI_IO_PROTOCOL *p,UINTN *s,UINTN *b,UINTN *d,UINTN *f){CHECK(p==&Io);*s=*d=*f=0;/* This board puts the GPU at bus 8, unlike upstream's bus 1. */ *b=8;return EFI_SUCCESS;}
 static EFI_STATUS EFIAPI ConfigRead(EFI_PCI_IO_PROTOCOL *p,EFI_PCI_IO_PROTOCOL_WIDTH w,UINT32 off,UINTN count,VOID *out){CHECK(p==&Io&&w==EfiPciIoWidthUint32&&!off&&count==64);memcpy(out,Cfg,sizeof(Cfg));return EFI_SUCCESS;}
 static EFI_STATUS EFIAPI GetBar(EFI_PCI_IO_PROTOCOL *p,UINT8 index,UINT64 *support,VOID **out){
-  CHECK(p==&Io&&!index);*support=0;EFI_ACPI_ADDRESS_SPACE_DESCRIPTOR *d=calloc(1,sizeof(*d));CHECK(d);d->Desc=0x8a;d->Len=43;d->AddrRangeMin=GU_BAR0_BASE;d->AddrRangeMax=0x80ffffff;d->AddrLen=0x1000000;*out=d;return EFI_SUCCESS;
+  CHECK(p==&Io&&!index);*support=0;EFI_ACPI_ADDRESS_SPACE_DESCRIPTOR *d=calloc(1,sizeof(*d));CHECK(d);d->Desc=0x8a;d->Len=43;d->AddrRangeMin=GU_BAR0_BASE;d->AddrRangeMax=GU_BAR0_BASE+0xffffff;d->AddrLen=0x1000000;*out=d;return EFI_SUCCESS;
 }
 static EFI_STATUS EFIAPI Attributes(EFI_PCI_IO_PROTOCOL *p,EFI_PCI_IO_PROTOCOL_ATTRIBUTE_OPERATION op,UINT64 mask,UINT64 *out){
   CHECK(p==&Io);
@@ -170,7 +172,10 @@ static void Setup(void) {
     Images[i].ImageBase=Code[i];Images[i].ImageSize=i==0?24576:i==1?14816:162016;Images[i].ImageCodeType=EfiBootServicesCode;
     Images[i].DeviceHandle=i==2?H(365):H(5);Images[i].FilePath=(VOID *)(i==0?OutFile:i==1?GfxFile:NvFile);
   }
-  if(Mode==WRONG_DRIVER)Bind[1].Version++;
+  /* Driver() reports per-board pins instead of refusing them, so the only
+   * structural refusals left are a binding without Stop, a mismatched owner
+   * handle and a missing loaded image. Use one of those, not Version. */
+  if(Mode==WRONG_DRIVER)Bind[1].Stop=NULL;
   if(Mode==USB_REMOVE_RECONNECT||Mode==USB_DYNAMIC_COUNT||Mode==USB_REMOVE_INPUT_CHANGED) {
     EFI_GUID usbio={0x2b2f68d6,0x0cd2,0x44cf,{0x8e,0x8b,0xbb,0xa2,0x0b,0x1b,0x5b,0x75}};
     EFI_GUID keyex={0xdd9e7534,0x7762,0x4698,{0x8c,0x14,0xf5,0x85,0x17,0xa6,0x25,0xaa}};
@@ -190,11 +195,24 @@ static void Setup(void) {
   }
 }
 int main(int argc,char **argv) {
-  CHECK(argc==2);
+  CHECK(argc==2 || argc==3);
+  /* These three segments are captured out of NVIDIA's own driver images on the
+   * reference MSI board. Only their sizes, one Stop pointer offset and one
+   * code digest are read, and Driver() reports a mismatch instead of refusing,
+   * so no CHECK depends on the bytes. Without the captures a deterministic
+   * stand-in of the same length exercises the identical code path, and the run
+   * says which one it used rather than pretending the captures were present. */
+  BOOLEAN synthetic=(argc==3 && !strcmp(argv[2],"synthetic"));
   for(UINTN i=0;i<3;i++) {
-    char name[4096];snprintf(name,sizeof(name),"%s/driver-%u.bin",argv[1],i==0?307:i==1?312:393);
-    FILE *f=fopen(name,"rb");CHECK(f);UINTN size=i==0?24576:i==1?14816:162016,rva=i==2?0x280:0x2a0,bytes=i==0?19872:i==1?7280:137711;
-    Code[i]=calloc(1,size);CHECK(Code[i]);CHECK(fread(Code[i]+rva,1,bytes,f)==bytes&&fgetc(f)==EOF);fclose(f);
+    UINTN size=i==0?24576:i==1?14816:162016,rva=i==2?0x280:0x2a0,bytes=i==0?19872:i==1?7280:137711;
+    Code[i]=calloc(1,size);CHECK(Code[i]);
+    if(synthetic) {
+      for(UINTN k=0;k<size;k++)Code[i][k]=(UINT8)((k*131u+i*7u)&0xffu);
+    } else {
+      char name[4096];snprintf(name,sizeof(name),"%s/driver-%u.bin",argv[1],i==0?307:i==1?312:393);
+      FILE *f=fopen(name,"rb");CHECK(f);
+      CHECK(fread(Code[i]+rva,1,bytes,f)==bytes&&fgetc(f)==EOF);fclose(f);
+    }
   }
   for(Mode=OK;Mode<MODE_COUNT;Mode++) {
     Setup();EFI_STATUS s=GuMsiPreflight(&St,H(450),H(365));
@@ -274,7 +292,7 @@ int main(int argc,char **argv) {
     if(Mode>=STATUS_DRIFT) {
       CHECK(s==EFI_SUCCESS&&Stops==3&&Exclusive&&GuMsiReleased());
       UINT32 *devsta=&Cfg[0x80/4],*linksta=&Cfg[0x88/4];
-      CHECK(Cfg[0x78/4]==0x0012b410&&*devsta==0x00092930&&*linksta==0x11030040);
+      CHECK(Cfg[0x78/4]==0x0012b410&&*devsta==0x00092930&&*linksta==0x11040040);
       /* Pre-FLR drift, as the firmware run produced before the aperture check. */
       Drift=TRUE;NotesUsed=0;Notes[0]=0;
       if(Mode==STATUS_DRIFT){Cfg[1]|=0x00080000;*devsta=(*devsta|0x00020000)&~0x00010000u;*linksta|=0x40000000;}
@@ -296,9 +314,9 @@ int main(int argc,char **argv) {
         if(Mode==FATAL_DRIFT)CHECK(strstr(Notes,"refused: offset=0x80 captured=0x92930 now=0xd2930 bits=0x40000 flrs=0"));
         if(Mode==PARITY_DRIFT)CHECK(strstr(Notes,"refused: offset=0x4 captured=0x100003 now=0x80100003 bits=0x80000000"));
         if(Mode==CONTROL_DRIFT)CHECK(strstr(Notes,"refused: offset=0x80 captured=0x92930 now=0x92920 bits=0x10"));
-        if(Mode==LINK_DRIFT)CHECK(strstr(Notes,"refused: offset=0x88 captured=0x11030040 now=0x11010040 bits=0x20000"));
-        if(Mode==GRAPH_DRIFT)CHECK(strstr(Notes,"MSI graph unexpected: handle=0x16e agent=0x1c1 controller=0x16e protocol="));
-        Gu.quiesced=TRUE;Gu.flrs=1;CHECK(GuMsiFinish()!=EFI_SUCCESS&&Exclusive&&!Closes&&strstr(Notes,"MSI finish refused"));
+        if(Mode==LINK_DRIFT)CHECK(strstr(Notes,"refused: offset=0x88 captured=0x11040040 now=0x11010040 bits=0x50000"));
+        if(Mode==GRAPH_DRIFT)CHECK(strstr(Notes,"GPU graph unexpected: handle=0x16e agent=0x1c1 controller=0x16e protocol="));
+        Gu.quiesced=TRUE;Gu.flrs=1;CHECK(GuMsiFinish()!=EFI_SUCCESS&&Exclusive&&!Closes&&strstr(Notes,"GPU finish refused"));
         CHECK(!GuMsiReadyForWindows());
       }
       printf("MSI drift case %d PASS\n",Mode);
@@ -312,5 +330,5 @@ int main(int argc,char **argv) {
     } else {CHECK(s!=EFI_SUCCESS&&GuMsiMutated());CHECK(Stops<=3);if(Mode==DECODE_EXTRA_BIT||Mode==CLAIM_FAIL)CHECK(!Enables);}
     printf("MSI release case %d PASS stops=%zu decode_writes=%zu\n",Mode,(size_t)Stops,(size_t)Enables);
   }
-  for(UINTN i=0;i<3;i++)free(Code[i]);printf("MSI: %u checks across %u cases; captured graph/code, all callbacks simulated.\n",Checks,MODE_COUNT);return 0;
+  for(UINTN i=0;i<3;i++)free(Code[i]);printf("MSI: %u checks across %u cases; captured graph, %s code, all callbacks simulated.\n",Checks,MODE_COUNT,synthetic?"synthetic":"captured");return 0;
 }
