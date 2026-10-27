@@ -396,11 +396,26 @@ static int ad102_readout(struct unlock_transaction_work *work, const char *phase
 
 static int check_entry_selectors(struct unlock_transaction_work *work)
 {
-    u32 a,b;
-    if (!work->selectors_saved || !Gu.profile_verified ||
-        read_bar(work,GU_FEAT_SS0_OFFSET,&a) || read_bar(work,GU_FEAT_SS1_OFFSET,&b) ||
-        !GuEntrySelectorsMatch(a,b) || a!=work->ss0_entry || b!=work->ss1_entry)
+    u32 a=0,b=0;
+    int ra,rb;
+    /* Three call sites turn a refusal here into -EIO or -EPROTO, and the
+     * transaction log only prints the number. Name the one that gave way:
+     * a bare -EIO after a 320 W VBIOS override is otherwise
+     * indistinguishable from a genuine hardware fault. */
+    /* Read only where the original short-circuit would have read: an unverified
+     * profile must not touch BAR0 just to fill in a diagnostic. */
+    BOOLEAN probe=work->selectors_saved && Gu.profile_verified;
+    ra=probe?read_bar(work,GU_FEAT_SS0_OFFSET,&a):0;
+    rb=probe?read_bar(work,GU_FEAT_SS1_OFFSET,&b):0;
+    if (!work->selectors_saved || !Gu.profile_verified || ra || rb ||
+        !GuEntrySelectorsMatch(a,b) || a!=work->ss0_entry || b!=work->ss1_entry) {
+        dev_err(&work->pdev->dev,
+            "entry selectors refused: saved=%u verified=%u read=%d/%d "
+            "SS0=%#x SS1=%#x entry=%#x %#x\n",
+            work->selectors_saved?1u:0u,Gu.profile_verified?1u:0u,ra,rb,
+            a,b,work->ss0_entry,work->ss1_entry);
         return GU_RESULT(-EIO);
+    }
     return 0;
 }
 
