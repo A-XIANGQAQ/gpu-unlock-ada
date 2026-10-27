@@ -75,6 +75,10 @@ BOOLEAN GuBootLogOpen(VOID){return Log!=NULL;}
 EFI_STATUS GuBootOpen(EFI_HANDLE image,EFI_SYSTEM_TABLE *t) {
   if(Table)return EFI_ALREADY_STARTED;
   if(!image||!t||!t->BootServices)return EFI_INVALID_PARAMETER;
+  /* A new session starts unsealed. Firmware calls this once, but the flag must
+   * not survive a close: a caller that opens again would otherwise log nothing
+   * and never learn why. */
+  Sealed=FALSE;
   Table=t;Self=image;
   EFI_BOOT_SERVICES *b=t->BootServices;EFI_LOADED_IMAGE_PROTOCOL *loaded=NULL;
   EFI_SIMPLE_FILE_SYSTEM_PROTOCOL *fs=NULL;EFI_DEVICE_PATH_PROTOCOL *path=NULL;
