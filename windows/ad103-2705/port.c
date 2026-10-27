@@ -295,15 +295,23 @@ EFI_STATUS GuFlr(VOID) {
   if(EFI_ERROR(GuConfigRead(EfiPciIoWidthUint16,Gu.pcie_cap+8,&Ctl)))return EFI_DEVICE_ERROR;
   if(Ctl&0x8000)return EFI_NOT_READY;
 #ifdef GU_ENTRY_LATCHED
-  UINT32 Ss0=GuRead32(0x82381c),Ss1=GuRead32(0x823820),Entry0,Entry1;
-  if(!Gu.prom_verified || Gu.fault || !GuGetEntrySelectors(&Entry0,&Entry1) ||
-     Ss0!=0x88888888U ||
+  UINT32 Ss0=GuRead32(0x82381c),Ss1=GuRead32(0x823820),Entry0=0,Entry1=0;
+  /* Five distinct preconditions collapse into one silent EFI_NOT_READY here,
+   * and this is the last gate before the reset. Name the one that gave way:
+   * pcie_flr() turns the status into -EIO, and an unnamed -EIO reaches the
+   * transaction log as a bare result=-5. */
+  BOOLEAN latched=GuGetEntrySelectors(&Entry0,&Entry1);
 #ifdef GU_ENTRY_LATCHED_SS1_PRESERVE
-     Ss1!=Entry1
+  BOOLEAN target=(Ss1==Entry1);
 #else
-     Ss1!=0x8U || SelectorPhase!=GU_SELECTOR_PHASE_TARGET
+  BOOLEAN target=(Ss1==0x8U&&SelectorPhase==GU_SELECTOR_PHASE_TARGET);
 #endif
-     )return EFI_NOT_READY;
+  if(!Gu.prom_verified || Gu.fault || !latched || Ss0!=0x88888888U || !target){
+    GuLog("FLR refused: verified=%u fault=%u latched=%u SS0=%#x SS1=%#x entry=%#x %#x phase=%u\n",
+      Gu.prom_verified?1u:0u,Gu.fault?1u:0u,latched?1u:0u,Ss0,Ss1,Entry0,Entry1,
+      (UINT32)SelectorPhase);
+    return EFI_NOT_READY;
+  }
 #endif
   Ctl|=0x8000;Gu.flrs++;GuStarted();
   ResetStatus=GuConfigWrite(EfiPciIoWidthUint16,Gu.pcie_cap+8,&Ctl);
