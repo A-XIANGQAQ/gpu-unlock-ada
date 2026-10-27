@@ -9,7 +9,7 @@ static UINT64 Mask;
 static VOID fresh(VOID) {
   test_entry_ss0=0x23613005;test_entry_ss1=1;setup(SUCCESS);
   Mask=0xffffffffffffULL;
-  Device=(struct pci_dev){.vendor=0x10de,.device=0x2782,
+  Device=(struct pci_dev){.vendor=0x10de,.device=0x2705,
     .dev={.dma_mask=&Mask,.coherent_dma_mask=0xfffffffffULL},.pm_cap=0x60,.refs=1};
 }
 static VOID rejected(const char *name,struct gpu_unlock_610_shared *shared) {
@@ -38,7 +38,7 @@ int main(int argc,char **argv) {
       case 5:Gu.owned=FALSE;break;
       case 6:Gu.display_check=NULL;break;
       case 7:registers[0x823818/4]^=1;break;
-      case 8:Device.device=0x2705;break;
+      case 8:Device.device=0x2782;break;
       case 9:Gu.transaction_attempted=TRUE;break;
     }
     rejected("identity/cold state/ownership/retry",&shared);
