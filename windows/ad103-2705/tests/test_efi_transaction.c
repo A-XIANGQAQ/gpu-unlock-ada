@@ -423,6 +423,10 @@ static VOID setup(enum scenario mode) {
 #ifdef GU_ENTRY_LATCHED
   registers[SS0/4]=test_entry_ss0;registers[SS1/4]=test_entry_ss1;
   CHECK(GuAd104Prepare()==EFI_SUCCESS);
+  /* app.c re-runs this gate after the driver let go of the GPU and before the
+   * handoff, so it has to hold for whichever entry state was latched. Nothing
+   * else in the suite reaches the real profile.c implementation. */
+  CHECK(GuAd104ColdEntry()==TRUE);
   if(mode==CORE_ENTRY_SS0)registers[SS0/4]^=1;
   if(mode==CORE_ENTRY_SS1)registers[SS1/4]^=1;
 #endif
