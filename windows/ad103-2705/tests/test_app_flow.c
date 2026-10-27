@@ -5,7 +5,7 @@
 #include <stdlib.h>
 #include <setjmp.h>
 static unsigned Checks,Case,Calls,Releases,Transactions,Finishes,WindowsCalls,Closes;
-static BOOLEAN Mutated,Silenced;static jmp_buf Escape;
+static BOOLEAN Mutated,Silenced,Cold;static unsigned Scenarios;static jmp_buf Escape;
 static EFI_PCI_IO_PROTOCOL Io;static EFI_BOOT_SERVICES Bs;static EFI_RUNTIME_SERVICES Rs;static EFI_SYSTEM_TABLE St;
 GU_PLATFORM Gu;
 #define CHECK(x) do{Checks++;if(!(x)){fprintf(stderr,"app FAIL case=%u line=%d %s\n",Case,__LINE__,#x);exit(1);}}while(0)
@@ -30,7 +30,9 @@ VOID GuBootSay(const CHAR16 *s){(void)s;CHECK(!Silenced);}
 VOID GuBootSilence(VOID){CHECK(Calls==6);Silenced=TRUE;}
 EFI_STATUS GuMsiRelease(VOID){CHECK(Silenced);Releases++;Mutated=TRUE;Gu.owned=TRUE;return Tick(7);}
 BOOLEAN GuMsiReleased(VOID){return Mutated&&Gu.owned;}
-BOOLEAN GuAd104ColdEntry(VOID){return TRUE;}
+/* app.c asks twice: once through GuAd104Prepare before the driver lets go,
+ * and again after. This stub is the post-release one, so a case can refuse it. */
+BOOLEAN GuAd104ColdEntry(VOID){return Cold;}
 int gpu_unlock_610_load_shared(struct pci_dev *d,struct gpu_unlock_610_shared *shared){CHECK(d->device==0x2705&&Gu.owned&&Gu.armed&&Gu.display_ok);(void)shared;return Tick(8)==EFI_SUCCESS?0:-EIO;}
 int gpu_unlock_610_unlock(struct pci_dev *d,const struct gpu_unlock_610_shared *s){(void)d;(void)s;Transactions++;Gu.started=TRUE;Gu.quiesced=TRUE;Gu.flrs=1;return Tick(9)==EFI_SUCCESS?0:-EIO;}
 void gpu_unlock_610_release_shared(struct gpu_unlock_610_shared *s){(void)s;}
@@ -46,19 +48,28 @@ EFI_STATUS GuBootWindows(VOID){WindowsCalls++;if(Case)CHECK(Calls==10&&!Gu.owned
 VOID GuBootHalt(VOID){CHECK(Mutated);longjmp(Escape,1);}
 int main(void){
   for(volatile unsigned iteration=0;iteration<14;iteration++) {
-    Case=iteration==13?99:iteration;Checks++;Calls=Releases=Transactions=Finishes=WindowsCalls=Closes=0;Mutated=Silenced=FALSE;
+    Case=iteration==13?99:iteration;Checks++;Calls=Releases=Transactions=Finishes=WindowsCalls=Closes=0;Mutated=Silenced=FALSE;Cold=TRUE;
     memset(&Gu,0,sizeof(Gu));memset(&Bs,0,sizeof(Bs));memset(&Rs,0,sizeof(Rs));memset(&St,0,sizeof(St));memset(&Io,0,sizeof(Io));
     Bs.LocateHandleBuffer=Locate;Bs.HandleProtocol=Handle;Bs.FreePool=Free;Rs.GetVariable=GetVariable;St.BootServices=&Bs;St.RuntimeServices=&Rs;Io.Pci.Read=Read;Io.GetLocation=Location;
-    if(!setjmp(Escape))(VOID)UefiMain((EFI_HANDLE)1,&St);
+    Scenarios++;if(!setjmp(Escape))(VOID)UefiMain((EFI_HANDLE)1,&St);
     if(Case==0)CHECK(WindowsCalls==1&&!Mutated);
     else if(Case==99)CHECK(!Calls&&!WindowsCalls);
     else if(Case<=12)CHECK(!WindowsCalls);
     CHECK(Releases<=1&&Transactions<=1&&Finishes<=1&&WindowsCalls<=1);
     printf("app flow case %u PASS\n",Case);
   }
+  /* The gate runs again after GuMsiRelease. If it refuses there, the drivers are
+   * already detached, so the one thing that must not happen is starting Windows
+   * on top of that state; app.c halts instead and says so on screen. */
+  Case=13;Calls=Releases=Transactions=Finishes=WindowsCalls=Closes=0;Mutated=Silenced=FALSE;Cold=FALSE;
+  memset(&Gu,0,sizeof(Gu));
+  Scenarios++;if(!setjmp(Escape))(VOID)UefiMain((EFI_HANDLE)1,&St);
+  CHECK(Releases==1&&Transactions==0&&Finishes==0&&WindowsCalls==0&&Closes==1);
+  printf("app flow case %u PASS\n",Case);
+
   /* Full U path with returned Windows image must stop, never retry. */
-  Case=100;Calls=Releases=Transactions=Finishes=WindowsCalls=Closes=0;Mutated=Silenced=FALSE;
-  if(!setjmp(Escape))(VOID)UefiMain((EFI_HANDLE)1,&St);
+  Case=100;Calls=Releases=Transactions=Finishes=WindowsCalls=Closes=0;Mutated=Silenced=FALSE;Cold=TRUE;
+  Scenarios++;if(!setjmp(Escape))(VOID)UefiMain((EFI_HANDLE)1,&St);
   CHECK(WindowsCalls==1&&Releases==1&&Transactions==1&&Finishes==1&&Closes==1);
-  printf("app flow: %u checks; 15 scenarios, all effects simulated.\n",Checks);return 0;
+  printf("app flow: %u checks; %u scenarios, all effects simulated.\n",Checks,Scenarios);return 0;
 }
