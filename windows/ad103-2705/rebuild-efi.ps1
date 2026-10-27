@@ -40,7 +40,9 @@ $ErrorActionPreference = 'Stop'
 #                              move; see the note under $Known
 #   24a958e  104448  AFB6524A  only rebuild-efi.ps1 changed
 #   55f3bf1  104448  AFB6524A  only tests/test_efi_transaction.c changed
-#   a96c26a  104448  AFB6524A  only tests/test_app_flow.c changed (HEAD)
+#   a96c26a  104448  AFB6524A  only tests/test_app_flow.c changed
+#   dcda05c  104448  BFC70FF1  app.c stage label split, and app.c is compiled
+#                              into the image, so the bytes move this time (HEAD)
 #
 # Only 76FEE036 has ever unlocked anything. Everything from cef0935 on has never
 # been booted, so a bisect between c794f3e and cef0935 separates "the build that
@@ -51,7 +53,8 @@ $Known = @{
     '64D7036565781C843F013A9F9AAC004EDBDCCDD6BD628CEF6D14319B2D0D9F49' = '6df9735  never booted'
     '950689CBDB85E87CCDD13303B4F03C7C95E799B1EA77F318DEDBB2384CA8BAB9' = '6a82336  never booted'
     'AFB6524A381FCA131009A72F085F867E061152E35B1BD70EE0487B47B2B7772D' = '6adb3ee .. a96c26a  never booted; was on the stick 03:22 .. 04:40'
-  '9092110AEAA956644AF4334FB230DA2586B9A92527D45DBAB640CB1FD773F338' = '68ee8c9           never booted; the staging message no longer claims a pin'
+  '9092110AEAA956644AF4334FB230DA2586B9A92527D45DBAB640CB1FD773F338' = '68ee8c9 / 1ecaf35 never booted; the staging message no longer claims a pin'
+  'BFC70FF1660A0B25423C23DD0BE48D507B85F20DA67714D4F626598E3A66DA50' = 'dcda05c           never booted; two post-release refusals got separate stages'
 }
 
 # A comment can move the hash. GU_RESULT() is
