@@ -234,7 +234,7 @@ EFI_STATUS GuBootLoadWindows(VOID) {
     EFI_LOADED_IMAGE_PROTOCOL *im=NULL;s=b->HandleProtocol(Windows,&LoadedGuid,(VOID **)&im);
     if(s==EFI_SUCCESS&&(!im||im->DeviceHandle!=volume))s=EFI_UNSUPPORTED;
   }
-  GuLog("Windows image staged: status=%#llx matches=%zu SHA256 pinned\n",(unsigned long long)s,(size_t)matches);
+  GuLog("Windows image staged: status=%#llx matches=%zu digest recorded above\n",(unsigned long long)s,(size_t)matches);
   return s;
 }
 EFI_STATUS GuBootChoose(BOOLEAN *unlock) {
