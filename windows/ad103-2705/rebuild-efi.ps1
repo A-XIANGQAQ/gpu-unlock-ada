@@ -50,7 +50,9 @@ $ErrorActionPreference = 'Stop'
 #   cce9fda  105472  250C7EA1  only rebuild-efi.ps1 changed
 #   34983b3  105472  75314A88  GuEnableMaster() names its selector refusal
 #   1b11c35  105472  75314A88  only rebuild-efi.ps1 changed
-#   e3da9f9  105472  8BEEE6FE  GuAd104Prepare() names its twelfth refusal too (HEAD)
+#   e3da9f9  105472  8BEEE6FE  GuAd104Prepare() names its twelfth refusal too
+#   baf9649  105984  DDE1A608  GuFlr() names its pre-FLR refusal, so the reset no
+#                              longer fails as a bare -EIO in the transaction log (HEAD)
 #
 # Only 76FEE036 has ever unlocked anything. Everything from cef0935 on has never
 # been booted, so a bisect between c794f3e and cef0935 separates "the build that
@@ -66,6 +68,7 @@ $Known = @{
   '250C7EA182428C9DF5F71575FC9B464F491BC261021F6B304208BA34B6EAAE46' = '1fd73d4 / cce9fda  never booted; each cold-prepare refusal names itself'
   '75314A88E2D2209627379C5C8E3820B9B8B51CA42340625D480D4CAD660917AA' = '34983b3 / 1b11c35  never booted; the selector refusal under Bus Master enable names itself'
   '8BEEE6FE0A8FD5563F5ADC5F18CFDE6C660EC2C1B8902E578E34C2F4A136051D' = 'e3da9f9  never booted; every cold-prepare refusal names itself'
+  'DDE1A608AD58E1E3A78C13FBFFDCED97C93298EBC6C15A930D58EF70DDE601BE' = 'baf9649  never booted; the pre-FLR refusal names itself too'
 }
 
 # A comment can move the hash. GU_RESULT() is
