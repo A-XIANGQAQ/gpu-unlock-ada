@@ -28,15 +28,29 @@ BOOLEAN GuSelectorPhase(UINT32 Phase) {
   if(!((SelectorPhase==GU_SELECTOR_PHASE_ENTRY && Phase==GU_SELECTOR_PHASE_SS0_WRITTEN && !Ss1WriteConsumed) ||
        (SelectorPhase==GU_SELECTOR_PHASE_SS0_WRITTEN && Phase==GU_SELECTOR_PHASE_SS1_WRITE && !Ss1WriteConsumed) ||
        (SelectorPhase==GU_SELECTOR_PHASE_SS1_WRITE && Phase==GU_SELECTOR_PHASE_TARGET && Ss1WriteConsumed))) {
+    /* An out-of-order transition is a bug in the caller, and the caller in
+     * unlock_610.c turns the FALSE into a bare -EIO. Say which transition. */
+    GuLog("selector phase refused: from=%u to=%u consumed=%u\n",
+      (UINT32)SelectorPhase,(UINT32)Phase,Ss1WriteConsumed?1u:0u);
     Gu.fault=TRUE;return FALSE;
   }
   if(!Gu.profile_verified || !Gu.armed || !Gu.owned || Gu.fault || !Gu.prom_verified ||
-     !GuGetEntrySelectors(&entry0,&entry1))return FALSE;
+     !GuGetEntrySelectors(&entry0,&entry1)) {
+    GuLog("selector phase gate refused: verified=%u armed=%u owned=%u fault=%u prom=%u latched=%u\n",
+      Gu.profile_verified?1u:0u,Gu.armed?1u:0u,Gu.owned?1u:0u,Gu.fault?1u:0u,
+      Gu.prom_verified?1u:0u,EntryLatched?1u:0u);
+    return FALSE;
+  }
   ss0=GuRead32(0x82381c);ss1=GuRead32(0x823820);
   if(Gu.fault || ss0!=0x88888888U ||
      (Phase==GU_SELECTOR_PHASE_SS0_WRITTEN && ss1!=entry1) ||
      (Phase==GU_SELECTOR_PHASE_SS1_WRITE && ss1!=entry1) ||
      (Phase==GU_SELECTOR_PHASE_TARGET && ss1!=0x8U)) {
+    /* This is the last place a selector write can be judged before the FLR,
+     * so the values have to be on screen: a zeroed SS0 here and a zeroed SS0
+     * at entry are different problems. */
+    GuLog("selector phase rejected: phase=%u SS0=%#x SS1=%#x entry=%#x %#x fault=%u\n",
+      (UINT32)Phase,ss0,ss1,entry0,entry1,Gu.fault?1u:0u);
     Gu.fault=TRUE;return FALSE;
   }
   (void)entry0;

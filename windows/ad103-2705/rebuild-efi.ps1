@@ -54,7 +54,9 @@ $ErrorActionPreference = 'Stop'
 #   baf9649  105984  DDE1A608  GuFlr() names its pre-FLR refusal, so the reset no
 #                              longer fails as a bare -EIO in the transaction log
 #   c0b470a  106496  208CDD40  check_entry_selectors() names which of its six
-#                              preconditions refused, inside the transaction (HEAD)
+#                              preconditions refused, inside the transaction
+#   0705256  106496  07052565  GuSelectorPhase() names all three of its refusals,
+#                              so a zeroed SS0 after the write is on screen (HEAD)
 #
 # Only 76FEE036 has ever unlocked anything. Everything from cef0935 on has never
 # been booted, so a bisect between c794f3e and cef0935 separates "the build that
@@ -72,6 +74,7 @@ $Known = @{
   '8BEEE6FE0A8FD5563F5ADC5F18CFDE6C660EC2C1B8902E578E34C2F4A136051D' = 'e3da9f9  never booted; every cold-prepare refusal names itself'
   'DDE1A608AD58E1E3A78C13FBFFDCED97C93298EBC6C15A930D58EF70DDE601BE' = 'baf9649  never booted; the pre-FLR refusal names itself too'
   '208CDD40CA3985C47D3E605E480D2BAF922356DAE210B3786AC2A5FFBA01F39E' = 'c0b470a  never booted; the in-transaction selector refusal names itself'
+  '0705256564E57690EF51F282A81DF99E9DA5AF411AE49B56FDE110C6D99120C6' = 'c0b470a+ never booted; the three selector-phase refusals name themselves'
 }
 
 # A comment can move the hash. GU_RESULT() is
