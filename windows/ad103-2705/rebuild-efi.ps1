@@ -42,7 +42,11 @@ $ErrorActionPreference = 'Stop'
 #   55f3bf1  104448  AFB6524A  only tests/test_efi_transaction.c changed
 #   a96c26a  104448  AFB6524A  only tests/test_app_flow.c changed
 #   dcda05c  104448  BFC70FF1  app.c stage label split, and app.c is compiled
-#                              into the image, so the bytes move this time (HEAD)
+#                              into the image, so the bytes move this time
+#   c80b09f  104448  BFC70FF1  same bytes as dcda05c; the commits between only
+#                              touched docs, tools and tests
+#   1fd73d4  105472  250C7EA1  GuAd104Prepare() names each of its eleven silent
+#                              refusals, so the image grows by about 1 KiB (HEAD)
 #
 # Only 76FEE036 has ever unlocked anything. Everything from cef0935 on has never
 # been booted, so a bisect between c794f3e and cef0935 separates "the build that
@@ -54,7 +58,8 @@ $Known = @{
     '950689CBDB85E87CCDD13303B4F03C7C95E799B1EA77F318DEDBB2384CA8BAB9' = '6a82336  never booted'
     'AFB6524A381FCA131009A72F085F867E061152E35B1BD70EE0487B47B2B7772D' = '6adb3ee .. a96c26a  never booted; was on the stick 03:22 .. 04:40'
   '9092110AEAA956644AF4334FB230DA2586B9A92527D45DBAB640CB1FD773F338' = '68ee8c9 / 1ecaf35 never booted; the staging message no longer claims a pin'
-  'BFC70FF1660A0B25423C23DD0BE48D507B85F20DA67714D4F626598E3A66DA50' = 'dcda05c           never booted; two post-release refusals got separate stages'
+  'BFC70FF1660A0B25423C23DD0BE48D507B85F20DA67714D4F626598E3A66DA50' = 'dcda05c .. c80b09f never booted; two post-release refusals got separate stages'
+  '250C7EA182428C9DF5F71575FC9B464F491BC261021F6B304208BA34B6EAAE46' = '1fd73d4  never booted; each cold-prepare refusal names itself'
 }
 
 # A comment can move the hash. GU_RESULT() is
