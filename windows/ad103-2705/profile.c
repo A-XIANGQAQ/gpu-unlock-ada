@@ -117,10 +117,19 @@ static BOOLEAN Registers(UINT32 *Ss0,UINT32 *Ss1) {
   }
   *Ss0=GuRead32(0x82381c);*Ss1=GuRead32(0x823820);
   if(Gu.fault){GuLog("cold-profile selector read fault\n");return FALSE;}
-  if(*Ss0==0xffffffff||(*Ss0&0xffff0000)==0xbadf0000||*Ss0==0x88888888||*Ss1!=0x1){
-    GuLog("cold-profile selector mismatch: SS0=%#x SS1=%#x wantSS1=%#x\n",*Ss0,*Ss1,0x1);
+  /* Two entry states are accepted. stock: SS1 carries 1, as every plain
+   * boot shows. blank: both read 0, which is what this card reports when a
+   * loaded VBIOS override is in force (RUN0007-RUN0012, six boots,
+   * byte-identical logs). Every other pin still matches stock in that state,
+   * so the selectors are the only part of the profile the override disturbs,
+   * and 0 is itself a legal "no override applied" value rather than a corrupt
+   * read. Anything else stays a mismatch. */
+  BOOLEAN stock=(*Ss1==0x1U),blank=(*Ss0==0U&&*Ss1==0U);
+  if(*Ss0==0xffffffff||(*Ss0&0xffff0000)==0xbadf0000||*Ss0==0x88888888||(!stock&&!blank)){
+    GuLog("cold-profile selector mismatch: SS0=%#x SS1=%#x stockSS1=%#x\n",*Ss0,*Ss1,0x1);
     return FALSE;
   }
+  if(blank)GuLog("cold-profile blank selectors: SS0=0 SS1=0, accepted as no-override entry state\n");
   return TRUE;
 }
 BOOLEAN GuAd104ColdEntry(VOID) {

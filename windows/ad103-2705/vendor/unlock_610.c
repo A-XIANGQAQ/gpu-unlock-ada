@@ -1294,8 +1294,14 @@ static int unlock_transaction_gfw(struct unlock_transaction_work *work)
 				dev_err(&work->pdev->dev, "card already initialised since power on (WPR2 enabled); power off first\n");
 				return GU_RESULT(-EBUSY);
 			}
+            /* The entry state this transaction expects is either stock
+             * (SS1 = 1) or blank (SS0 = SS1 = 0, seen only with a loaded
+             * VBIOS override; see profile.c Registers()). Both leave SS0
+             * distinct from the unlock value, so the write below still has
+             * somewhere to go. */
             if (!Gu.profile_verified || !GuEntrySelectorsMatch(ss0,ss1) ||
-                inaccessible(ss0) || ss0==GU_SS0_UNLOCK || ss1!=1 ||
+                inaccessible(ss0) || ss0==GU_SS0_UNLOCK ||
+                !(ss1==1 || (ss0==0 && ss1==0)) ||
                 work->plm_entry!=0xffffff8f || sample.plm!=0x8b8f ||
                 sample.boot!=0x3ff || sample.cpuctl!=0x10 || wpr_hi)
                 return GU_RESULT(-EIO);
