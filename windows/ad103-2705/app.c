@@ -55,7 +55,11 @@ EFI_STATUS EFIAPI UefiMain(EFI_HANDLE image,EFI_SYSTEM_TABLE *t) {
   if(Gu.fault){s=EFI_DEVICE_ERROR;goto failed;}
   GuBootSilence();
   stage="MSI-release";s=GuMsiRelease();if(s!=EFI_SUCCESS||Gu.fault)goto failed;
-  if(!GuMsiReleased()||!GuAd104ColdEntry()){s=EFI_NOT_READY;goto failed;}
+  /* Two different refusals used to share the "MSI-release" label, so a log
+   * could not say which one fired: the exclusive claim not being held, or the
+   * cold-profile gate refusing a second time after the driver let go. */
+  if(!GuMsiReleased()){s=EFI_NOT_READY;stage="release-not-held";goto failed;}
+  if(!GuAd104ColdEntry()){s=EFI_NOT_READY;stage="post-release-gate";goto failed;}
   Gu.display_check=GuMsiReleased;Gu.display_ok=TRUE;Gu.armed=TRUE;
   UINT64 mask=0xffffffffffffULL;
   struct pci_dev dev={.vendor=0x10de,.device=0x2705u,.dev={.dma_mask=&mask,.coherent_dma_mask=0xfffffffffULL},
