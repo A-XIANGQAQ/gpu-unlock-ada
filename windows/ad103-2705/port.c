@@ -189,7 +189,15 @@ EFI_STATUS GuEnableMaster(VOID) {
 #ifdef GU_ENTRY_LATCHED
   /* No logging/callback window between this final comparison and enabling BME. */
   UINT32 Ss0=GuRead32(0x82381c),Ss1=GuRead32(0x823820);
-  if(!GuEntrySelectorsMatch(Ss0,Ss1)){Status=EFI_NOT_READY;goto fail;}
+  if(!GuEntrySelectorsMatch(Ss0,Ss1)){
+    /* Reaching fail: below prints only the status word, so name the cause
+     * here. Nothing is logged before the comparison itself, which is what
+     * the comment above asks for. */
+    UINT32 latched0=0,latched1=0;GuGetEntrySelectors(&latched0,&latched1);
+    GuLog("Bus Master refused: selectors moved SS0=%#x SS1=%#x latched=%#x %#x\n",
+      Ss0,Ss1,latched0,latched1);
+    Status=EFI_NOT_READY;goto fail;
+  }
 #endif
   /* Track before the call: an error may be returned after a hardware change. */
   Gu.master_attributes_pending=TRUE;
