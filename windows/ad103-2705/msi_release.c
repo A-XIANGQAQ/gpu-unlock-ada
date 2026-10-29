@@ -439,8 +439,16 @@ static BOOLEAN ConfigStable(const UINT32 c[64]) {
   for(UINTN i=0;i<64;i++) {
     UINT32 drift=c[i]^Plan.config[i];
     if(!drift)continue;
+#ifdef GU_VGA_RESTORE
+    /* The captured Stop clears the command's BME bit; that is the required
+     * handoff state and must not be treated as config drift. */
+    BOOLEAN allowed=(BOOLEAN)(i==1&&!(drift&~4u)&&!(c[i]&4u));
+    if(!allowed)allowed=Gu.flrs==1&&i==0x80/4&&Plan.config[0x78/4]==0x0012b410&&
+      !(c[i]&~Plan.config[i])&&!(drift&~0x00090000u);
+#else
     BOOLEAN allowed=Gu.flrs==1&&i==0x80/4&&Plan.config[0x78/4]==0x0012b410&&
       !(c[i]&~Plan.config[i])&&!(drift&~0x00090000u);
+#endif
     if(!allowed) {
       NOTE("PCI config drift refused: offset=%#x captured=%#x now=%#x bits=%#x flrs=%u\n",
         (unsigned)(i*4),Plan.config[i],c[i],drift,Gu.flrs);
@@ -553,8 +561,20 @@ EFI_STATUS GuMsiPreflight(EFI_SYSTEM_TABLE *t,EFI_HANDLE self,EFI_HANDLE pci) {
 }
 static BOOLEAN DecodeMask(const UINT32 c[64],UINT64 *mask) {
   *mask=0;UINT32 missing=Plan.config[1]&~c[1]&3;
+#ifdef GU_VGA_RESTORE
+  /* Some ASUS firmware Stops clear BME together with IO/MEM (and VGA). The
+   * claim restores only the missing IO/MEM and must leave BME off, so the
+   * preflight command may have BME set while the stopped command does not. */
+  if((Plan.config[1]&2)!=2||(c[1]&4))return FALSE;
+  for(UINTN i=0;i<64;i++) {
+    UINT32 expected=Plan.config[i];
+    if(i==1)expected&=(UINT32)~4u;
+    if((c[i]|(i==1?missing:0))!=expected)return FALSE;
+  }
+#else
   if((Plan.config[1]&6)!=2||(c[1]&4))return FALSE;
   for(UINTN i=0;i<64;i++)if((c[i]|(i==1?missing:0))!=Plan.config[i])return FALSE;
+#endif
   *mask=(missing&1?EFI_PCI_IO_ATTRIBUTE_IO:0)|(missing&2?EFI_PCI_IO_ATTRIBUTE_MEMORY:0);return TRUE;
 }
 static EFI_STATUS ClaimRestore(VOID) {
@@ -578,9 +598,21 @@ static EFI_STATUS ClaimRestore(VOID) {
   if(s==EFI_SUCCESS&&mask)s=io->Attributes(io,EfiPciIoAttributeOperationEnable,mask,NULL);
   b->RestoreTPL(old);
   if(s==EFI_SUCCESS)s=ReadConfig(c);
+#ifdef GU_VGA_RESTORE
+  if(s==EFI_SUCCESS)for(UINTN i=0;i<64;i++) {
+    UINT32 expected=Plan.config[i];
+    if(i==1)expected&=(UINT32)~4u;
+    if(c[i]!=expected){s=EFI_NOT_READY;break;}
+  }
+#else
   if(s==EFI_SUCCESS&&!Equal(c,Plan.config,sizeof(c)))s=EFI_NOT_READY;
+#endif
   if(s==EFI_SUCCESS)s=io->Attributes(io,EfiPciIoAttributeOperationGet,0,&attrs);
+#ifdef GU_VGA_RESTORE
+  if(s==EFI_SUCCESS&&attrs!=(Plan.attributes&~(EFI_PCI_IO_ATTRIBUTE_BUS_MASTER|0x18u)))s=EFI_NOT_READY;
+#else
   if(s==EFI_SUCCESS&&attrs!=Plan.attributes)s=EFI_NOT_READY;
+#endif
   if(s==EFI_SUCCESS)s=Bar();
   if(s==EFI_SUCCESS&&!GuAd104ColdEntry())s=EFI_NOT_READY;
   GuLog("GPU exclusive claim/decode result: status=%#llx\n",(unsigned long long)s);return s;
@@ -631,7 +663,12 @@ BOOLEAN GuMsiReleased(VOID) {
   else if(Alive()!=EFI_SUCCESS)failed="console";
   else if(Gops(FALSE)!=EFI_SUCCESS)failed="GOP";
   else if(!ConfigStable(c))failed="config-drift";
+#ifdef GU_VGA_RESTORE
+  else if(Gu.pci->Attributes(Gu.pci,EfiPciIoAttributeOperationGet,0,&attrs)!=EFI_SUCCESS||
+          (attrs&0x700u)!=((UINT64)(Plan.config[1]&3u)<<8))failed="attributes";
+#else
   else if(Gu.pci->Attributes(Gu.pci,EfiPciIoAttributeOperationGet,0,&attrs)!=EFI_SUCCESS||attrs!=Plan.attributes)failed="attributes";
+#endif
   else if(Snapshot(&Current)!=EFI_SUCCESS)failed="graph-snapshot";
   else {
     /* Expected() only proves that edges it did NOT expect to disappear are still

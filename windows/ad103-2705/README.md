@@ -115,6 +115,17 @@ Note this is **not** the aggregate-console topology from
 — that one requires a pathless, zero-framebuffer GOP after release, and this
 GOP has `fb=0x7800000000`, `fbsz=0x1900000`.
 
+## Opt-in VGA restore (experimental)
+
+`-VgaRestore` builds an experimental variant that restores the VGA/ISA
+attribute mask `0x18` and verifies the parent bridge VGA-enable bit after FLR,
+before the exclusive claim is released. It is off by default. The evidence
+from the separate Windows audit harness, the exact pre/post register values,
+the claim-policy change and the limitations are in
+[`docs/windows-ad103-vga-restore.md`](../../docs/windows-ad103-vga-restore.md).
+The default build is unchanged; this variant has not been hardware-validated
+in this app.
+
 ## Known gaps
 
 - **Three-stage release.** `ad104-msi` also has three stages, but

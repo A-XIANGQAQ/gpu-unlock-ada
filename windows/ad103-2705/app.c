@@ -6,6 +6,9 @@
 #include "boot_io.h"
 #include "compat/compat.h"
 #include "vendor/unlock_610.h"
+#ifdef GU_VGA_RESTORE
+#include "vga_restore.h"
+#endif
 static EFI_GUID PciGuid=EFI_PCI_IO_PROTOCOL_GUID;
 static EFI_GUID GlobalGuid={0x8be4df61,0x93ca,0x11d2,{0xaa,0x0d,0,0xe0,0x98,0x03,0x2b,0x8c}};
 static EFI_STATUS Discover(EFI_HANDLE image,EFI_SYSTEM_TABLE *t) {
@@ -74,6 +77,13 @@ EFI_STATUS EFIAPI UefiMain(EFI_HANDLE image,EFI_SYSTEM_TABLE *t) {
     GuLog("transaction incomplete result=%d fault=%u; refusing to continue\n",result,Gu.fault);
     s=EFI_DEVICE_ERROR;goto failed;
   }
+#ifdef GU_VGA_RESTORE
+  /* The owner Stop cleared the GPU VGA bits 0x18 and the parent bridge's
+   * VGA-enable bit; restore only those while the claim is held, after FLR. */
+  stage="vga-restore-post-flr";s=GuRestoreVga();
+  if(s!=EFI_SUCCESS||Gu.fault)goto failed;
+  GuLog("VGA-RESTORE INTEGRATED OK: GPU 0x318 and parent 0x718/0x18 verified after FLR\n");
+#endif
   stage="release-exclusive-claim";s=GuMsiFinish();
   if(s!=EFI_SUCCESS||Gu.fault){
     /* GuMsiFinish() closes the exclusive claim first and only then compares the

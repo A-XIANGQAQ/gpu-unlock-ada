@@ -1,11 +1,12 @@
-param([string]$Gcc='gcc',[string]$Python='python',[string]$VcVars64)
+param([string]$Gcc='gcc',[string]$Python='python',[string]$VcVars64,[switch]$VgaRestore)
 $ErrorActionPreference='Stop'
 Push-Location -LiteralPath $PSScriptRoot
 try {
  & .\Build.ps1 -Gcc $Gcc -Python $Python
  if(!$?){throw 'Core build failed'}
  $flags=@('-std=c11','-O2','-Wall','-Wextra','-Werror','-Wno-unused-parameter','-Wno-misleading-indentation','-D__KERNEL__','-DGU_UEFI_PORT','-DGU_AD104_TRANSACTION','-DGU_ENTRY_LATCHED_SS1_FULL','-Icompat','-Ivendor/edk2/Include','-Ivendor/edk2/Include/X64','-ffreestanding','-fno-builtin','-fno-stack-protector','-mno-stack-arg-probe','-mno-red-zone','-fshort-wchar','-fstack-usage')
- foreach($s in @('app','boot_io','msi_release')) {
+ if($VgaRestore){$flags += '-DGU_VGA_RESTORE'}
+ foreach($s in @('app','boot_io','msi_release','vga_restore')) {
   & $Gcc @flags -c ($s+'.c') -o ('build/'+$s+'.o')
   if($LASTEXITCODE -ne 0){throw "Compile failed: $s"}
  }
@@ -18,7 +19,7 @@ try {
  if(!$vcvars -or !(Test-Path -LiteralPath $vcvars)){throw 'MSVC x64 tools not found'}
  if($vcvars -match '["&|<>%^!\r\n]'){throw 'Unsupported command-shell path characters'}
  if($PSScriptRoot -match '["&|<>%^!\r\n]'){throw 'Unsupported command-shell path characters'}
- $objects=@('app','boot_io','msi_release','port','compat','checks','profile','sha256','runtime','format','vendor_unlock_610','vendor_prep_610','vendor_layout_610','vendor_vbios_610','vendor_gfw_eval')
+ $objects=@('app','boot_io','msi_release','vga_restore','port','compat','checks','profile','sha256','runtime','format','vendor_unlock_610','vendor_prep_610','vendor_layout_610','vendor_vbios_610','vendor_gfw_eval')
  $lines=@('@echo off',('call "'+$vcvars+'" >nul'),'if errorlevel 1 exit /b 1',('cd /d "'+$PSScriptRoot+'"'),('link /nologo /subsystem:efi_application /entry:UefiMain /machine:x64 /nodefaultlib /incremental:no /fixed:no /dynamicbase:no /nxcompat:no /brepro /out:build\AD104-EXPERIMENTAL.EFI '+(($objects | ForEach-Object {'build\'+$_+'.o'}) -join ' ')),'exit /b %errorlevel%')
  Set-Content -LiteralPath build/link-msvc.cmd -Value $lines -Encoding ascii
  & $env:ComSpec /d /c ('"'+(Join-Path $PSScriptRoot 'build\link-msvc.cmd')+'"')
